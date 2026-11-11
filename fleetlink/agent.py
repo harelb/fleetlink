@@ -45,8 +45,8 @@ import numpy as np
 
 from fleetlink import codec, media, video
 from fleetlink.codec import GraphDelta, GraphState
-from fleetlink.scheduler import Item, Scheduler
 from fleetlink.node_status import RTT_WARN_S, StatusReporter, agent_status
+from fleetlink.scheduler import Item, Scheduler
 from fleetlink.transport import Transport, split_endpoints
 
 # rmw_zenoh 0.2.11 links zenoh-c 1.8; eclipse-zenoh must speak the same protocol
@@ -433,12 +433,16 @@ class AgentCore:
     def on_mesh_delta(self, delta: dict) -> None:
         """Hydra frontend ``full_mesh_update`` (see mesh_deform_link.delta_from_msg)."""
         with self._lock:
+            if self.odom is None:
+                return
             self.odom.on_delta(delta)
             self._refresh_odom_mesh()
 
     def on_mesh_graph_incremental(self, nodes) -> None:
         """New control points: [(index, stamp_ns, pose7 at the original position)]."""
         with self._lock:
+            if self.odom is None:
+                return
             before = self.odom.version
             self.odom.on_ctrl_incremental(nodes)
             if self.odom.version != before:
@@ -447,6 +451,8 @@ class AgentCore:
     def on_mesh_graph(self, nodes) -> None:
         """Backend ``mesh_graph``: optimized control-point poses."""
         with self._lock:
+            if self.odom is None:
+                return
             self.odom.on_values(nodes)
 
     def reset_odom_mesh(self) -> None:
