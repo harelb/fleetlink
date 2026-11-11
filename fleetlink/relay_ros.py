@@ -44,9 +44,12 @@ import time
 
 from fleetlink.relay import RelayConfig, RelayCore
 
-HERE = pathlib.Path(__file__).resolve().parent
-DEFAULT_RELAY_CONFIG = HERE.parent / "config" / "relay.yaml"
-DEFAULT_TOPOLOGY = HERE.parents[1] / "network_diagnostics" / "config" / "topology.yaml"
+# The fleet topology (machines, roles, platform_type, fleetlink base): the
+# ``topology`` parameter, else $ADT4_TOPOLOGY, else the copy an installed ADT4
+# ``dcist_launch_system`` package ships under its share directory (if it does).
+TOPOLOGY_ENV = "ADT4_TOPOLOGY"
+TOPOLOGY_PACKAGE = "dcist_launch_system"
+TOPOLOGY_SHARE_PATH = ("config", "topology.yaml")
 DEFAULT_PLATFORM = "spot"  # robots without platform_type in the topology
 # executor threads of fleetlink-agent / fleetlink-bridge (rclpy's default is the CPU
 # count), and the relayed service calls one end lets wait at once: the rest of the
@@ -143,6 +146,43 @@ def qos_profile(q: dict):
         if q.get("durability") == "transient_local"
         else DurabilityPolicy.VOLATILE,
     )
+
+
+def find_topology(explicit: str = "") -> str | None:
+    """The topology file to use: ``explicit`` (parameter), else ``$ADT4_TOPOLOGY``,
+    else ``<share of dcist_launch_system>/config/topology.yaml`` when that package is
+    installed and ships one; None when there is none."""
+    if explicit:
+        return explicit
+    env = os.environ.get(TOPOLOGY_ENV)
+    if env:
+        return env
+    try:
+        from ament_index_python.packages import get_package_share_directory
+
+        share = pathlib.Path(get_package_share_directory(TOPOLOGY_PACKAGE))
+    except Exception:  # noqa: BLE001  (no ament index / package not installed)
+        return None
+    path = share.joinpath(*TOPOLOGY_SHARE_PATH)
+    return str(path) if path.is_file() else None
+
+
+def require_file(path: str, what: str, hint: str) -> str:
+    """``path`` when it is a file; else a ``SystemExit`` naming what is missing."""
+    if not path:
+        raise SystemExit(f"fleetlink: no {what} given; {hint}")
+    if not os.path.isfile(path):
+        raise SystemExit(f"fleetlink: {what} not found: {path}; {hint}")
+    return path
+
+
+TOPOLOGY_HINT = (
+    "pass -p topology:=<topology.yaml> or set ADT4_TOPOLOGY"
+)
+RELAY_CONFIG_HINT = (
+    "pass -p relay_config:=<relay.yaml> (schema: config/relay.example.yaml in "
+    "the fleetlink package share directory)"
+)
 
 
 def load_topology(path) -> dict:
@@ -682,8 +722,12 @@ def main(args=None) -> None:
     node = Node("fleetlink_bridge")
     p = lambda name, default: node.declare_parameter(name, default).value  # noqa: E731
     connect = split_endpoints(p("zenoh_connect", "tcp/127.0.0.1:7450"))
-    topo_path = p("topology", "") or str(DEFAULT_TOPOLOGY)
-    relay_path = p("relay_config", "") or str(DEFAULT_RELAY_CONFIG)
+    topo_path = require_file(
+        find_topology(p("topology", "")), "topology", TOPOLOGY_HINT
+    )
+    relay_path = require_file(
+        p("relay_config", ""), "relay_config", RELAY_CONFIG_HINT
+    )
     robots_param = p("robots", "")  # comma-separated override of the topology robots
     topology = load_topology(topo_path)
     base = p("base_name", "") or _base_name(topology)

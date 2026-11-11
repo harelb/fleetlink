@@ -1,0 +1,122 @@
+---
+# fleetlink generic ROS relay table: an example documenting the schema.
+#
+# fleetlink ships no relay table of its own: the deployment owns the list of ROS topics,
+# transforms and services that cross the radio, and passes its file to both ends
+# (fleetlink-agent -p relay_config:=<file>, fleetlink-bridge -p relay_config:=<file>).
+#
+# Both ends (RobotRelay on the robot, BaseBridge on the base) load this file; its hash goes
+# in the heartbeat so a mismatch is warned about. `{robot}` is replaced by the robot name.
+#
+# topics:  one entry per ROS topic that crosses the radio.
+#   topic          name pattern, usually "/{robot}/..."
+#   type           ROS message type (pkg/msg/Name). Type-hash mismatch => message rejected.
+#   dir            down = base -> robot, up = robot -> base. A topic must appear in ONE
+#                  direction only (validation rejects both; this is the loop prevention).
+#   mode           reliable         in order, queue cap 32, retry 1 s x 30, receiver dedupes
+#                  latest_reliable  a newer message replaces a pending retry; receiver applies
+#                                   only tseq above the last applied
+#                  latest           rate limited, fire and forget
+#   cls            fleetlink QoS class (C0 command/ack .. C6 image store) used for budgeting
+#   rate_hz        max send rate (latest mode); null = unlimited
+#   ttl_s          drop on the receiver if older than this (clock-offset corrected); null = no ttl
+#   ttl_strict     (latest only) fail closed: until the round-trip clock offset is measured
+#                  every message counts as expired; a latest value that waited past ttl_s
+#                  for its rate slot is dropped on the sender. For motion commands, so radio
+#                  delay can never replay motion.
+#   replay_on_resync  when the peer restarts, re-address pending messages to it (and, for
+#                  latest / latest_reliable, resend the last value; a reliable entry never
+#                  resends one the old peer acked). Off for commands so a rebooted robot
+#                  never re-runs a stale plan.
+#   qos            QoS of the republished ROS endpoint on the receiving side
+#                  (reliability: reliable|best_effort, durability: volatile|transient_local, depth)
+#   platform       optional list; only relay for these robot platforms (topology
+#                  platform_type: spot, phoenix; "husky" kept as an alias). A robot without
+#                  platform_type counts as spot (fleetlink.relay_ros.platform_of).
+# tf:        composed transform pairs (robot side uses a tf2 Buffer, base side republishes to
+#            /tf and /tf_static). Static transforms are sent once and again on resync.
+# services:  request/reply relayed with the C0 request/ack pattern (not Zenoh get).
+#            dir is the direction of the REQUEST (down: base calls robot-side server;
+#            up: robot calls base-side server). `service` is the name on the robot;
+#            `base_name` (default: same) the name on the base, where `{base}` is the
+#            base station's name (fleetlink-bridge param base_name).
+#            timeout_s: the caller gives up after this; requests are retried every 1 s.
+# Unknown keys, modes, directions or classes are rejected (fleetlink.relay.RelayConfig).
+version: 1
+
+topics:
+  # base -> robot command: only the newest matters, never replayed to a restarted robot
+  - topic: /{robot}/planner/plan
+    type: nav_msgs/msg/Path
+    dir: down
+    mode: latest_reliable
+    cls: C0
+    rate_hz: null
+    ttl_s: 30
+    replay_on_resync: false
+    qos: {reliability: reliable, durability: volatile, depth: 1}
+  # base -> robot velocity: strict ttl, so radio delay never replays motion
+  - topic: /{robot}/cmd_vel
+    type: geometry_msgs/msg/Twist
+    dir: down
+    mode: latest
+    cls: C0
+    rate_hz: 10.0
+    ttl_s: 0.5
+    ttl_strict: true
+    replay_on_resync: false
+    qos: {reliability: reliable, durability: volatile, depth: 1}
+    platform: [spot]
+  # robot -> base results: none may be lost
+  - topic: /{robot}/executor/result
+    type: std_msgs/msg/String
+    dir: up
+    mode: reliable
+    cls: C0
+    rate_hz: null
+    ttl_s: null
+    replay_on_resync: true
+    qos: {reliability: reliable, durability: volatile, depth: 10}
+  # robot -> base telemetry at most 1 Hz
+  - topic: /{robot}/battery
+    type: sensor_msgs/msg/BatteryState
+    dir: up
+    mode: latest
+    cls: C1
+    rate_hz: 1.0
+    ttl_s: 10
+    replay_on_resync: false
+    qos: {reliability: reliable, durability: volatile, depth: 1}
+
+tf:
+  - parent: map
+    child: "{robot}/base_link"
+    rate_hz: 5.0
+    ttl_s: 2
+    mode: latest
+    cls: C1
+    dir: up
+  # static transforms under {robot}/ are sent once and again on resync
+  - static: true
+    frames_prefix: "{robot}/"
+    dir: up
+    mode: latest_reliable
+    cls: C0
+    replay_on_resync: true
+
+services:
+  # the base calls a robot-side server
+  - service: /{robot}/save_map
+    type: std_srvs/srv/Trigger
+    dir: down
+    cls: C0
+    ttl_s: 30
+    timeout_s: 60
+  # the robot calls a server on the base, which serves it under the base's name
+  - service: /{robot}/report
+    base_name: /{base}/report
+    type: std_srvs/srv/Trigger
+    dir: up
+    cls: C0
+    ttl_s: 10
+    timeout_s: 10

@@ -1,0 +1,67 @@
+---
+# Relay table for the ROS relay tests (test_relay_ros.py, the multi-router harness).
+# The entries the fake robot / base nodes use, with the settings of a real deployment.
+version: 1
+
+topics:
+  - topic: /{robot}/omniplanner_node/compiled_plan_out
+    type: robot_executor_msgs/msg/ActionSequenceMsg
+    dir: down
+    mode: latest_reliable
+    cls: C0
+    rate_hz: null
+    ttl_s: 30
+    replay_on_resync: false
+    qos: {reliability: reliable, durability: volatile, depth: 1}
+    platform: [spot]
+  - topic: /{robot}/omniplanner_node/compiled_plan_out
+    type: nav_msgs/msg/Path
+    dir: down
+    mode: latest_reliable
+    cls: C0
+    rate_hz: null
+    ttl_s: 30
+    replay_on_resync: false
+    qos: {reliability: reliable, durability: volatile, depth: 1}
+    platform: [phoenix, husky]
+  - topic: /{robot}/spot_executor_node/action_result
+    type: robot_executor_msgs/msg/ActionResultMsg
+    dir: up
+    mode: reliable
+    cls: C0
+    rate_hz: null
+    ttl_s: null
+    replay_on_resync: true
+    qos: {reliability: reliable, durability: volatile, depth: 10}
+    platform: [spot]
+
+tf:
+  - parent: map
+    child: "{robot}/base_link"
+    rate_hz: 5.0
+    ttl_s: 2
+    mode: latest
+    cls: C1
+    dir: up
+  - static: true
+    frames_prefix: "{robot}/"
+    dir: up
+    mode: latest_reliable
+    cls: C0
+    replay_on_resync: true
+
+services:
+  - service: /{robot}/update_holding_state
+    base_name: /{base}/update_holding_state
+    type: heracles_ros_interfaces/srv/UpdateHoldingState
+    dir: up
+    cls: C0
+    ttl_s: 10
+    timeout_s: 10
+    platform: [spot]
+  - service: /{robot}/dsg_saver/save_dsg
+    type: dcist_launch_system_msgs/srv/SaveDsg
+    dir: down
+    cls: C0
+    ttl_s: 60
+    timeout_s: 60

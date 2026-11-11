@@ -3,8 +3,8 @@
 zenoh router (never the live 7447 one).
 
 Robot: ``AgentNode`` with ``relay_config`` (so ``RobotRelay``) + test publishers /
-servers.  Base: ``BaseBridge`` + test publishers / servers.  Uses the real
-``config/relay.yaml``.
+servers.  Base: ``BaseBridge`` + test publishers / servers.  Relay table:
+``tests/data/relay_test.yaml``.
 """
 
 import json
@@ -16,7 +16,7 @@ import pytest
 
 pytestmark = pytest.mark.integration
 
-RELAY_YAML = os.path.join(os.path.dirname(__file__), "..", "config", "relay.yaml")
+RELAY_YAML = os.path.join(os.path.dirname(__file__), "data", "relay_test.yaml")
 ROBOT_DOMAIN, BASE_DOMAIN = 90, 91
 PROXY_DOMAIN = 92
 

@@ -40,6 +40,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PKG = os.path.abspath(os.path.join(HERE, ".."))
 BIN = os.path.join(PKG, "bin")
 NODE_HOST = os.path.join(HERE, "harness_nodes", "node_host.py")
+RELAY_CONFIG = os.path.join(HERE, "data", "relay_test.yaml")
 RMW_ZENOHD = "/opt/ros/jazzy/lib/rmw_zenoh_cpp/rmw_zenohd"
 TAG_VAR = "FLEETLINK_HARNESS_TAG"
 LIVE_PORT = 7447
@@ -590,7 +591,7 @@ class Fleet:
         self.bridge = self._spawn(Proc("bridge", [
             sys.executable, os.path.join(BIN, "fleetlink-bridge"), "--ros-args",
             "-p", f"zenoh_connect:={fl_ep}", "-p", f"topology:={self.topology}",
-            "-p", f"base_name:={self.base_name}",
+            "-p", f"relay_config:={RELAY_CONFIG}", "-p", f"base_name:={self.base_name}",
         ], benv, self.tmp))  # fmt: skip
         self.base = self._spawn(Helper("base_helper", [
             sys.executable, NODE_HOST, "--role", "base", "--robots",
@@ -603,7 +604,7 @@ class Fleet:
             self.robots[r]["agent"] = self._spawn(Proc(f"{r}_agent", [
                 sys.executable, os.path.join(BIN, "fleetlink-agent"), "--ros-args",
                 "-r", f"__ns:=/{r}", "-p", f"robot_name:={r}",
-                "-p", "relay_config:=default", "-p", f"topology:={self.topology}",
+                "-p", f"relay_config:={RELAY_CONFIG}", "-p", f"topology:={self.topology}",
                 "-p", f"zenoh_connect:={px.endpoint}", "-p", "grid_period_s:=0.2",
             ], renv, self.tmp))  # fmt: skip
             self.robots[r]["helper"] = self._spawn(Helper(f"{r}_helper", [

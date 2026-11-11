@@ -1611,7 +1611,7 @@ def resolve_platform(robot: str, explicit: str = "", topology: str = "") -> str:
     if explicit:
         return relay_ros.platform_of({"platform_type": explicit})
     try:
-        topo = relay_ros.load_topology(topology or str(relay_ros.DEFAULT_TOPOLOGY))
+        topo = relay_ros.load_topology(relay_ros.find_topology(topology))
         machine = ((topo or {}).get("machines") or {}).get(robot)
     except Exception:  # noqa: BLE001  (no topology file on this machine)
         machine = None
@@ -2086,10 +2086,11 @@ class AgentNode:
         from fleetlink import relay_ros
         from fleetlink.relay import RelayConfig
 
-        if config_path == "default":
-            config_path = str(relay_ros.DEFAULT_RELAY_CONFIG)
+        relay_ros.require_file(
+            config_path, "relay_config", relay_ros.RELAY_CONFIG_HINT
+        )
         if not platform:
-            topo = relay_ros.load_topology(topology or str(relay_ros.DEFAULT_TOPOLOGY))
+            topo = relay_ros.load_topology(relay_ros.find_topology(topology))
             platform = relay_ros.topology_robots(topo).get(
                 robot, relay_ros.DEFAULT_PLATFORM
             )
