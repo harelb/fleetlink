@@ -323,33 +323,62 @@ class _RelayEnd:
         from rclpy.serialization import deserialize_message, serialize_message
 
         cls = import_type(s.type)
-        timer = threading.Timer(s.timeout_s, lambda: reply(None, "timeout"))
+        deadline = time.monotonic() + s.timeout_s
+        lock = threading.Lock()
+        finished = False
+
+        def finish(data, err=None):
+            nonlocal finished
+            with lock:
+                if finished:
+                    return
+                finished = True
+            timer.cancel()
+            reply(data, err)
+
+        timer = threading.Timer(s.timeout_s, lambda: finish(None, "timeout"))
         timer.daemon = True
         timer.start()
 
         def done(fut):
-            timer.cancel()
             try:
-                reply(serialize_message(fut.result()), None)
+                data = serialize_message(fut.result())
             except Exception as exc:  # noqa: BLE001
-                reply(None, f"{type(exc).__name__}: {exc}")
+                finish(None, f"{type(exc).__name__}: {exc}")
+            else:
+                finish(data)
 
         def work():
-            client = self._client(cls, ros_name)
-            if client is None:
-                timer.cancel()
-                reply(None, f"no client for {ros_name}")
-                return
-            if not client.wait_for_service(timeout_sec=min(5.0, s.timeout_s)):
-                timer.cancel()
-                reply(None, f"service {ros_name} not available")
-                return
-            req = deserialize_message(request, cls.Request)
+            try:
+                client = self._client(cls, ros_name)
+                if client is None:
+                    finish(None, f"no client for {ros_name}")
+                    return
+                if not client.wait_for_service(timeout_sec=min(5.0, s.timeout_s)):
+                    finish(None, f"service {ros_name} not available")
+                    return
+                req = deserialize_message(request, cls.Request)
 
-            def call():
-                client.call_async(req).add_done_callback(done)
+                def call():
+                    try:
+                        # Serialize dispatch with timeout completion, but register the
+                        # callback outside the lock: a ready future calls it inline.
+                        with lock:
+                            if finished:
+                                return
+                            expired = time.monotonic() >= deadline
+                            if not expired:
+                                future = client.call_async(req)
+                        if expired:
+                            finish(None, "timeout")
+                        else:
+                            future.add_done_callback(done)
+                    except Exception as exc:  # noqa: BLE001
+                        finish(None, f"{type(exc).__name__}: {exc}")
 
-            self._marshal(call)
+                self._marshal(call)
+            except Exception as exc:  # noqa: BLE001
+                finish(None, f"{type(exc).__name__}: {exc}")
 
         threading.Thread(target=work, daemon=True, name="fleetlink-srv").start()
 
@@ -728,9 +757,8 @@ def main(args=None) -> None:
     from rclpy.node import Node
 
     from fleetlink.agent import zenoh_version_warning
-    from fleetlink.transport import ZenohTransport, split_endpoints
-
     from fleetlink.node_status import StatusReporter, bridge_status
+    from fleetlink.transport import ZenohTransport, split_endpoints
 
     rclpy.init(args=args)
     node = Node("fleetlink_bridge")

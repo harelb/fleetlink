@@ -142,3 +142,21 @@ def test_guards_to_dict_lease_owner():
     assert guards_to_dict(msg)["lease_owner"] == ""  # robot built before the field
     msg.lease_owner = "bosdyn.android.spotapp tablet"
     assert guards_to_dict(msg)["lease_owner"] == "bosdyn.android.spotapp tablet"
+
+
+def test_odometric_callbacks_after_fallback_keep_streaming_dsg_mesh():
+    tr, clock, core = _agent(mesh_source="odometric")
+    core.fallback_to_dsg_mesh("mesh delta gap")
+    # These inputs keep arriving from the existing Hydra subscriptions. Ignoring
+    # them must preserve the fallback and leave graph/state streaming alive.
+    core.on_mesh_delta({})
+    core.on_mesh_graph_incremental([(0, 1, (0, 0, 0, 0, 0, 0, 1))])
+    core.on_mesh_graph([(0, 1, (1, 0, 0, 0, 0, 0, 1))])
+    core.reset_odom_mesh()
+    core.on_records(*synthetic_records(3), synthetic_mesh(4))
+    _run(clock, core, 2.0)
+    assert core.stats()["mesh"]["source"] == "dsg"
+    assert core.stats()["mesh"]["fallback"] == "mesh delta gap"
+    assert tr.messages("adt4/r/state")
+    assert tr.messages("adt4/r/dsg/delta")
+    assert tr.messages("adt4/r/mesh/tile/")

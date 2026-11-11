@@ -183,6 +183,21 @@ def test_agent_node_odometric_mesh(zenoh_router, monkeypatch):
         )
         assert pump(lambda: agent.core.stats()["mesh"]["source"] == "dsg", 10.0)
         assert "gap" in agent.core.stats()["mesh"]["fallback"]
+        # Hydra keeps publishing deformation graphs after the gap. Both existing
+        # callbacks must return normally so the executor and command relay survive.
+        handled = set()
+        for name in ("on_mesh_graph_incremental", "on_mesh_graph"):
+            original = getattr(agent.core, name)
+
+            def tracked(nodes, name=name, original=original):
+                original(nodes)
+                handled.add(name)
+
+            monkeypatch.setattr(agent.core, name, tracked)
+        inc_pub.publish(_pose_graph(pg.PoseGraph, pg.PoseGraphNode, ctrl))
+        graph_pub.publish(_pose_graph(pg.PoseGraph, pg.PoseGraphNode, moved))
+        assert pump(lambda: len(handled) == 2, 10.0)
+        assert spin.is_alive()
     finally:
         agent.shutdown()
         ex.shutdown()

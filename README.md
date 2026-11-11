@@ -466,6 +466,9 @@ message types that are not installed on a machine are skipped with a warning.
   again to a restarted base; a frame that is the child of a composed pair is left out, so it
   never gets two parents. For `dir: up` services (the robot calls, the base answers) it serves
   proxy servers, and for `dir: down` services it calls the robot's real servers.
+  A local service request waiting for an executor slot is discarded if its timeout
+  expires before dispatch. A request already issued to ROS cannot be cancelled by the
+  relay: it can still finish after a timeout, but its late response is ignored.
   `BaseBridge` is the `fleetlink-bridge` node, one process for every robot:
 
   ```bash
@@ -539,7 +542,7 @@ preference. Verified on zenoh 1.8 (`tests/test_fleetlink_router.py`):
   costs zenoh's `transport/unicast/open_timeout` before the next one is tried.
 
 **In ADT4** (Awesome-DCIST-T4), `topology.yaml`'s `fleet_defaults.fleet_link: router | fleetlink`
-picks the mode, `run-adt4` derives `ADT4_FLEET_LINK`, `ADT4_FLEETLINK_CONNECT` and
+picks the mode, `run-adt4` derives `ADT4_FLEETLINK_MODE`, `ADT4_FLEETLINK_CONNECT` and
 `ADT4_FLEETLINK_PORT` from it, and the generated `fleetlink` / `fleetlink_base` tmux windows start
 the agent, the router and the bridge; ADT4 keeps its relay table in
 `dcist_launch_system/fleetlink/relay.yaml`.
