@@ -6,7 +6,6 @@ from fleetlink import codec
 from fleetlink.relay import RelayConfig, RelayConfigError, RelayCore
 from fleetlink.transport import CLASSES, LinkEmulator, VirtualClock
 
-
 CFG = {
     "version": 1,
     "topics": [

@@ -176,9 +176,7 @@ def require_file(path: str, what: str, hint: str) -> str:
     return path
 
 
-TOPOLOGY_HINT = (
-    "pass -p topology:=<topology.yaml> or set ADT4_TOPOLOGY"
-)
+TOPOLOGY_HINT = "pass -p topology:=<topology.yaml> or set ADT4_TOPOLOGY"
 RELAY_CONFIG_HINT = (
     "pass -p relay_config:=<relay.yaml> (schema: config/relay.example.yaml in "
     "the fleetlink package share directory)"
@@ -725,9 +723,7 @@ def main(args=None) -> None:
     topo_path = require_file(
         find_topology(p("topology", "")), "topology", TOPOLOGY_HINT
     )
-    relay_path = require_file(
-        p("relay_config", ""), "relay_config", RELAY_CONFIG_HINT
-    )
+    relay_path = require_file(p("relay_config", ""), "relay_config", RELAY_CONFIG_HINT)
     robots_param = p("robots", "")  # comma-separated override of the topology robots
     topology = load_topology(topo_path)
     base = p("base_name", "") or _base_name(topology)

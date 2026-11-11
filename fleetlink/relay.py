@@ -1045,7 +1045,9 @@ class RelayCore:
             else:
                 acks.append((e.name, pid))
 
-    def _reassemble(self, e: Entry, st: _In, p: dict, pid: str, now: float) -> dict | None:
+    def _reassemble(
+        self, e: Entry, st: _In, p: dict, pid: str, now: float
+    ) -> dict | None:
         """Lock held: one part of a large message.  Acks the part; returns the
         whole message (as an unsplit payload) once every part is in, else None."""
         n, i = int(p["parts"]), int(p.get("part", 0))
@@ -1148,9 +1150,15 @@ class RelayCore:
                         pend.tries = 1  # progress: the retry budget restarts
                         if pend.last_pack_t is not None:
                             dt = now - pend.last_pack_t
-                            pend.ack_dt = dt if pend.ack_dt is None else 0.7 * pend.ack_dt + 0.3 * dt
+                            pend.ack_dt = (
+                                dt
+                                if pend.ack_dt is None
+                                else 0.7 * pend.ack_dt + 0.3 * dt
+                            )
                             # a part acked every ack_dt: allow the window plus slack
-                            pend.rto = min(2.0 * (self.chunk_window + 1) * pend.ack_dt, 8.0)
+                            pend.rto = min(
+                                2.0 * (self.chunk_window + 1) * pend.ack_dt, 8.0
+                            )
                         pend.last_pack_t = now
                     pend.have.add(part)
                     # fast retransmit: a part sent before this one and still not
@@ -1161,7 +1169,9 @@ class RelayCore:
                             if j not in pend.have and oj < order:
                                 pend.part_sent[j] = -1e18
                     self._send_parts(o, pend, now)
-            elif op == "ack" and not p.get("ok", True) and p.get("err") == "stale epoch":
+            elif (
+                op == "ack" and not p.get("ok", True) and p.get("err") == "stale epoch"
+            ):
                 # Sent by a new incarnation of the peer to a retry still addressed
                 # to the old one.  _peer_seen() above has already handled the
                 # restart: the pending was dropped, or (replay_on_resync)
@@ -1386,7 +1396,9 @@ class RelayCore:
                 # resends the parts not acked within the part timer; when every part
                 # is acked but the final ack was lost, resends the last part so the
                 # receiver acks the whole message again
-                if len(p.have) == p.parts and now - p.t_sent >= max(self.retry_s, p.rto):
+                if len(p.have) == p.parts and now - p.t_sent >= max(
+                    self.retry_s, p.rto
+                ):
                     p.t_sent = now
                     p.have.discard(p.parts - 1)
                     p.part_sent.pop(p.parts - 1, None)

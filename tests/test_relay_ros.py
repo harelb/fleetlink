@@ -137,13 +137,12 @@ def ros_pair(zenoh_router, monkeypatch):
 
 def test_relay_topics_services_tf_and_link_status(ros_pair):
     import tf2_ros
+    from dcist_launch_system_msgs.srv import SaveDsg
     from geometry_msgs.msg import TransformStamped
     from heracles_ros_interfaces.srv import UpdateHoldingState
     from rclpy.time import Time
     from robot_executor_msgs.msg import ActionResultMsg, ActionSequenceMsg
     from std_msgs.msg import String
-
-    from dcist_launch_system_msgs.srv import SaveDsg
 
     robot, base, bridge = ros_pair.robot, ros_pair.base, ros_pair.bridge
     core = bridge.core("robot1")

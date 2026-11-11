@@ -43,7 +43,6 @@
 #            timeout_s: the caller gives up after this; requests are retried every 1 s.
 # Unknown keys, modes, directions or classes are rejected (fleetlink.relay.RelayConfig).
 version: 1
-
 topics:
   # base -> robot command: only the newest matters, never replayed to a restarted robot
   - topic: /{robot}/planner/plan
@@ -51,7 +50,7 @@ topics:
     dir: down
     mode: latest_reliable
     cls: C0
-    rate_hz: null
+    rate_hz:
     ttl_s: 30
     replay_on_resync: false
     qos: {reliability: reliable, durability: volatile, depth: 1}
@@ -73,8 +72,8 @@ topics:
     dir: up
     mode: reliable
     cls: C0
-    rate_hz: null
-    ttl_s: null
+    rate_hz:
+    ttl_s:
     replay_on_resync: true
     qos: {reliability: reliable, durability: volatile, depth: 10}
   # robot -> base telemetry at most 1 Hz
@@ -87,10 +86,9 @@ topics:
     ttl_s: 10
     replay_on_resync: false
     qos: {reliability: reliable, durability: volatile, depth: 1}
-
 tf:
   - parent: map
-    child: "{robot}/base_link"
+    child: '{robot}/base_link'
     rate_hz: 5.0
     ttl_s: 2
     mode: latest
@@ -98,12 +96,11 @@ tf:
     dir: up
   # static transforms under {robot}/ are sent once and again on resync
   - static: true
-    frames_prefix: "{robot}/"
+    frames_prefix: '{robot}/'
     dir: up
     mode: latest_reliable
     cls: C0
     replay_on_resync: true
-
 services:
   # the base calls a robot-side server
   - service: /{robot}/save_map

@@ -2086,9 +2086,7 @@ class AgentNode:
         from fleetlink import relay_ros
         from fleetlink.relay import RelayConfig
 
-        relay_ros.require_file(
-            config_path, "relay_config", relay_ros.RELAY_CONFIG_HINT
-        )
+        relay_ros.require_file(config_path, "relay_config", relay_ros.RELAY_CONFIG_HINT)
         if not platform:
             topo = relay_ros.load_topology(relay_ros.find_topology(topology))
             platform = relay_ros.topology_robots(topo).get(

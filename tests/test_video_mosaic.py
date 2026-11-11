@@ -9,12 +9,12 @@ import numpy as np
 import pytest
 
 cv2 = pytest.importorskip("cv2")
-from helpers import RecordingTransport, env_bytes
-from test_video import _has_encoder
+from helpers import RecordingTransport, env_bytes  # noqa: E402
+from test_video import _has_encoder  # noqa: E402
 
-from fleetlink import video
-from fleetlink.agent import AgentCore
-from fleetlink.transport import VirtualClock
+from fleetlink import video  # noqa: E402
+from fleetlink.agent import AgentCore  # noqa: E402
+from fleetlink.transport import VirtualClock  # noqa: E402
 
 SPOT = ["rgb", "overlay", "frontleft", "frontright", "left", "right", "back", "hand"]
 COLORS = {
