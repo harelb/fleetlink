@@ -99,6 +99,7 @@ class Sim:
 
 @pytest.mark.integration
 def test_loop_closure_costs_values_not_tiles():
+    pytest.importorskip("scipy")  # fleetlink.deform's KD-tree
     g, pos, col, st, faces = _load()
     deltas, kept_faces = _deltas(pos, col, st, faces, STAGES)
     sim = Sim({"mesh_source": "odometric", "mesh_period_s": 2.0, "budgets": {"C3": 1_000_000},

@@ -20,13 +20,9 @@ from fleetlink.agent import AgentCore, graph_inputs
 from fleetlink.receiver import Receiver
 from fleetlink.transport import LinkEmulator, VirtualClock
 
-# a Hydra backend DSG with mesh (Pennovation courtyard-alleyways run); override with FLEETLINK_PENN_MAP
-MAP = os.environ.get(
-    "FLEETLINK_PENN_MAP",
-    os.path.expanduser(
-        "~/data/pennovation_2025/courtyard-alleyways/output/hydra/backend/dsg_with_mesh.json"
-    ),
-)
+# a Hydra backend DSG with mesh (dsg_with_mesh.json) of a real run, with the robot's
+# agent trajectory; the benchmark is skipped unless FLEETLINK_PENN_MAP points at one
+MAP = os.environ.get("FLEETLINK_PENN_MAP", "")
 ROBOT = "penn"
 STAGES = 20
 STAGE_PERIOD = 2.0  # s between graph reveals (Hydra publishes <= 1 Hz)
@@ -40,8 +36,10 @@ MESH_BOUND_S = 600.0  # whole mesh (13.4 MB at 100 kB/s ≈ 134 s) within this
 def penn():
     dsg = pytest.importorskip("spark_dsg")
     scipy_spatial = pytest.importorskip("scipy.spatial")
+    if not MAP:
+        pytest.skip("set FLEETLINK_PENN_MAP to a Hydra dsg_with_mesh.json")
     if not os.path.exists(MAP):
-        pytest.skip(f"missing {MAP}")
+        pytest.skip(f"FLEETLINK_PENN_MAP: missing {MAP}")
     G = dsg.DynamicSceneGraph.load(MAP)  # read-only
     records, edges, ls, mesh = graph_inputs(G)
     raw_full = len(G.to_binary(True))

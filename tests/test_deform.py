@@ -46,6 +46,7 @@ def _poses(ctrl, R, t):
 
 
 def test_uniform_correction_is_a_rigid_motion():
+    pytest.importorskip("scipy")  # fleetlink.deform's KD-tree
     ctrl, cst = _grid_ctrl()
     R, t = _rot_z(0.1), np.array([1.0, -2.0, 0.5])
     pose = _poses(ctrl, R, t)
@@ -97,6 +98,7 @@ def _reference(pts, st, ctrl, cst, pose, valid, k, tol_s):
 
 
 def test_matches_a_direct_reimplementation_with_windows_and_invalid_points():
+    pytest.importorskip("scipy")  # fleetlink.deform's KD-tree
     rng = np.random.default_rng(1)
     ctrl, cst = _grid_ctrl(8)
     # a smooth, non-rigid correction: rotation and shift grow along x
@@ -116,6 +118,7 @@ def test_matches_a_direct_reimplementation_with_windows_and_invalid_points():
 
 
 def test_indices_deform_only_those_vertices():
+    pytest.importorskip("scipy")  # fleetlink.deform's KD-tree
     ctrl, cst = _grid_ctrl()
     pose = _poses(ctrl, np.eye(3), np.array([0.0, 0.0, 1.0]))
     pts = np.zeros((10, 3), np.float32) + 3
@@ -192,6 +195,7 @@ def _mesh(n=40, seed=2):
 
 
 def test_odom_tiles_and_base_view_reproduce_the_deformation():
+    pytest.importorskip("scipy")  # fleetlink.deform's KD-tree
     pos, col, faces, stamp = _mesh()
     ctrl = ControlPoints()
     cpos, _ = _grid_ctrl(7)

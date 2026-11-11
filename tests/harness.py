@@ -483,7 +483,7 @@ class Fleet:
     arrival times of r's C1 ``state`` at the fleetlink router.
     """
 
-    def __init__(self, tmp: str, robots=("r1", "r2"), base: str = "willow",
+    def __init__(self, tmp: str, robots=("r1", "r2"), base: str = "base1",
                  port: int | None = None, domain: int | None = None,
                  exec_delay: float = 0.5):  # fmt: skip
         port = int(port or os.environ.get("FLEETLINK_HARNESS_PORT", 17470))

@@ -134,7 +134,7 @@ def test_guards_to_dict_lease_owner():
     from fleetlink.agent import guards_to_dict
 
     msg = SimpleNamespace(
-        robot_name="hamilton", battery_percent=50.0, battery_known=True,
+        robot_name="robot3", battery_percent=50.0, battery_known=True,
         estop_pressed=False, estop_known=True, powered_on=True, power_known=True,
         lease_owned=False, lease_known=True, faults=[], notes="Idle",
         header=SimpleNamespace(stamp=SimpleNamespace(sec=1, nanosec=0)),

@@ -86,7 +86,7 @@ def ros_pair(zenoh_router, monkeypatch):
 
     agent_node = rclpy.create_node(
         "fleetlink_agent",
-        namespace="euclid",
+        namespace="robot1",
         context=rctx,
         parameter_overrides=[
             Parameter("relay_config", value=RELAY_YAML),
@@ -101,8 +101,8 @@ def ros_pair(zenoh_router, monkeypatch):
         bridge_node,
         t_base,
         RelayConfig.load(RELAY_YAML),
-        {"euclid": "spot"},
-        base="willow",
+        {"robot1": "spot"},
+        base="base1",
         discover=False,
     )
     base = rclpy.create_node("base_test", context=bctx)
@@ -146,17 +146,17 @@ def test_relay_topics_services_tf_and_link_status(ros_pair):
     from dcist_launch_system_msgs.srv import SaveDsg
 
     robot, base, bridge = ros_pair.robot, ros_pair.base, ros_pair.bridge
-    core = bridge.core("euclid")
+    core = bridge.core("robot1")
     # clients of the real base servers exist up front (created on the executor /
     # before spinning, never lazily on zenoh's callback thread)
-    assert "/willow/update_holding_state" in bridge._clients
+    assert "/base1/update_holding_state" in bridge._clients
     assert _wait(lambda: core.connected(), 15), "relay heartbeats never arrived"
 
     # graphs are isolated: the base cannot see the robot's agent node
-    assert ("fleetlink_agent", "/euclid") not in base.get_node_names_and_namespaces()
+    assert ("fleetlink_agent", "/robot1") not in base.get_node_names_and_namespaces()
 
     # -- down: ActionSequenceMsg (latest_reliable) --------------------------------
-    plan_topic = "/euclid/omniplanner_node/compiled_plan_out"
+    plan_topic = "/robot1/omniplanner_node/compiled_plan_out"
     plans = []
     robot.create_subscription(ActionSequenceMsg, plan_topic, plans.append, 1)
     plan_pub = base.create_publisher(ActionSequenceMsg, plan_topic, 1)
@@ -164,15 +164,15 @@ def test_relay_topics_services_tf_and_link_status(ros_pair):
 
     def send_plan():
         n[0] += 1
-        plan_pub.publish(ActionSequenceMsg(plan_id=f"p{n[0]}", robot_name="euclid"))
+        plan_pub.publish(ActionSequenceMsg(plan_id=f"p{n[0]}", robot_name="robot1"))
 
     assert _wait(lambda: plans, 20, step=send_plan), core.status()
-    assert plans[-1].robot_name == "euclid" and plans[-1].plan_id.startswith("p")
+    assert plans[-1].robot_name == "robot1" and plans[-1].plan_id.startswith("p")
     st = core.status()["topics"][plan_topic]
     assert st["acked"] >= 1 and st["subs"] >= 1  # robot-side subscriber reported back
 
     # -- up: action_result (reliable) ----------------------------------------------
-    res_topic = "/euclid/spot_executor_node/action_result"
+    res_topic = "/robot1/spot_executor_node/action_result"
     results = []
     base.create_subscription(ActionResultMsg, res_topic, results.append, 10)
     res_pub = robot.create_publisher(ActionResultMsg, res_topic, 10)
@@ -183,7 +183,7 @@ def test_relay_topics_services_tf_and_link_status(ros_pair):
     assert _wait(lambda: results, 20, step=send_result)
     assert results[0].plan_id == "p1" and results[0].action_index == 2
 
-    # -- service, base calls robot: /euclid/dsg_saver/save_dsg ----------------------
+    # -- service, base calls robot: /robot1/dsg_saver/save_dsg ----------------------
     saved = []
 
     def save(req, resp):
@@ -191,12 +191,12 @@ def test_relay_topics_services_tf_and_link_status(ros_pair):
         resp.success = True
         return resp
 
-    robot.create_service(SaveDsg, "/euclid/dsg_saver/save_dsg", save)
-    cli = base.create_client(SaveDsg, "/euclid/dsg_saver/save_dsg")
+    robot.create_service(SaveDsg, "/robot1/dsg_saver/save_dsg", save)
+    cli = base.create_client(SaveDsg, "/robot1/dsg_saver/save_dsg")
     resp = _call(cli, SaveDsg.Request(save_path="/tmp/x.json", include_mesh=True), 30)
     assert resp is not None and resp.success and saved == ["/tmp/x.json"]
 
-    # -- service, robot calls base: update_holding_state (served as /willow/...) ----
+    # -- service, robot calls base: update_holding_state (served as /base1/...) ----
     held = []
 
     def hold(req, resp):
@@ -204,12 +204,12 @@ def test_relay_topics_services_tf_and_link_status(ros_pair):
         resp.success = True
         return resp
 
-    base.create_service(UpdateHoldingState, "/willow/update_holding_state", hold)
-    cli = robot.create_client(UpdateHoldingState, "/euclid/update_holding_state")
+    base.create_service(UpdateHoldingState, "/base1/update_holding_state", hold)
+    cli = robot.create_client(UpdateHoldingState, "/robot1/update_holding_state")
     resp = _call(cli, UpdateHoldingState.Request(is_holding=True, id="O(3)"), 30)
     assert resp is not None and resp.success and held == [(True, "O(3)")]
 
-    # -- TF: composed map -> euclid/base_link + static euclid/* on the base --------
+    # -- TF: composed map -> robot1/base_link + static robot1/* on the base --------
     tfb = tf2_ros.TransformBroadcaster(robot)
     stb = tf2_ros.StaticTransformBroadcaster(robot)
 
@@ -223,11 +223,11 @@ def test_relay_topics_services_tf_and_link_status(ros_pair):
 
     stb.sendTransform(
         [
-            tf("euclid/odom", "euclid/base_link", 1.0),
-            tf("euclid/base_link", "euclid/camera", 0.5),
+            tf("robot1/odom", "robot1/base_link", 1.0),
+            tf("robot1/base_link", "robot1/camera", 0.5),
         ]
     )
-    robot.create_timer(0.1, lambda: tfb.sendTransform(tf("map", "euclid/odom", 2.0)))
+    robot.create_timer(0.1, lambda: tfb.sendTransform(tf("map", "robot1/odom", 2.0)))
     buf = tf2_ros.Buffer()
     tf2_ros.TransformListener(buf, base)
 
@@ -237,9 +237,9 @@ def test_relay_topics_services_tf_and_link_status(ros_pair):
         except Exception:
             return None
 
-    assert _wait(lambda: lookup("euclid/camera") is not None, 20)
-    assert lookup("euclid/base_link") == pytest.approx(3.0)
-    assert lookup("euclid/camera") == pytest.approx(3.5)
+    assert _wait(lambda: lookup("robot1/camera") is not None, 20)
+    assert lookup("robot1/base_link") == pytest.approx(3.0)
+    assert lookup("robot1/camera") == pytest.approx(3.5)
 
     # -- fleetlink/link_status ------------------------------------------------------
     status = []
@@ -251,7 +251,7 @@ def test_relay_topics_services_tf_and_link_status(ros_pair):
     )
     assert _wait(lambda: status, 5)
     s = status[-1]
-    assert s["robot"] == "euclid" and s["connected"] and s["cfg_match"] is True
+    assert s["robot"] == "robot1" and s["connected"] and s["cfg_match"] is True
     assert s["rtt"] is not None and s["topics"][plan_topic]["acked"] >= 1
 
     # after all that traffic the two ROS graphs still never saw each other
@@ -287,8 +287,8 @@ def test_proxy_calls_never_starve_the_agent(zenoh_router, monkeypatch):
     puts = []
     put = link.robot.put
     link.robot.put = lambda k, d, c: (puts.append((time.time(), k)), put(k, d, c))[1]
-    base = RelayCore("euclid", "base", link.base, RelayConfig.load(RELAY_YAML),
-                     base="willow", on_service=lambda s, req, reply: None)  # fmt: skip
+    base = RelayCore("robot1", "base", link.base, RelayConfig.load(RELAY_YAML),
+                     base="base1", on_service=lambda s, req, reply: None)  # fmt: skip
     running = [True]
 
     def pump():
@@ -301,7 +301,7 @@ def test_proxy_calls_never_starve_the_agent(zenoh_router, monkeypatch):
     rclpy.init(context=ctx, domain_id=PROXY_DOMAIN, signal_handler_options=SignalHandlerOptions.NO)  # fmt: skip
     ex = relay_ros.make_executor(ctx)
     assert ex._executor._max_workers == relay_ros.EXECUTOR_THREADS
-    agent_node = rclpy.create_node("fleetlink_agent", namespace="euclid", context=ctx,
+    agent_node = rclpy.create_node("fleetlink_agent", namespace="robot1", context=ctx,
         parameter_overrides=[Parameter("relay_config", value=RELAY_YAML),
                              Parameter("relay_platform", value="spot")])  # fmt: skip
     agent = AgentNode(transport=link.robot, node=agent_node)
@@ -319,7 +319,7 @@ def test_proxy_calls_never_starve_the_agent(zenoh_router, monkeypatch):
     try:
         core = agent.relay.core
         assert _wait(core.connected, 10), "relay heartbeats never arrived"
-        cli = caller.create_client(UpdateHoldingState, "/euclid/update_holding_state")
+        cli = caller.create_client(UpdateHoldingState, "/robot1/update_holding_state")
         assert cli.wait_for_service(timeout_sec=10)
 
         link.close_transport(60.0)  # the dropout; the core stays "connected" ~3 s
@@ -343,7 +343,7 @@ def test_proxy_calls_never_starve_the_agent(zenoh_router, monkeypatch):
         assert len(done) == n - relay_ros.MAX_PROXY_CALLS
         win = [t for t in ticks if t0 <= t <= t1]
         assert len(win) >= 0.6 * (t1 - t0) / 0.05, len(win)
-        states = [t for t, k in puts if k == "adt4/euclid/state" and t0 <= t <= t1]
+        states = [t for t, k in puts if k == "adt4/robot1/state" and t0 <= t <= t1]
         assert len(states) >= 0.6 * 4.0 * (t1 - t0), len(states)  # state_hz 4
         # the link is known down now: a new call fails at once
         assert not core.connected()

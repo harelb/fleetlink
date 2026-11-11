@@ -9,8 +9,8 @@ receipts per plan id and publishes one ``action_result`` per receipt after
 ``update_holding_state`` client, an optional random occupancy-grid load and an
 optional random camera image (the agent's ``rgb`` camera).
 
-``--role base --robots r1,r2 --base willow``: plan publishers, ``action_result``
-subscribers, a tf2 buffer, the ``/willow/update_holding_state`` server and a
+``--role base --robots r1,r2 --base base1``: plan publishers, ``action_result``
+subscribers, a tf2 buffer, the ``/base1/update_holding_state`` server and a
 ``/fleetlink/link_status`` subscriber.
 
 Everything that touches rclpy entities runs on the executor thread (a 50 Hz
@@ -40,7 +40,7 @@ def main():
     ap.add_argument("--role", choices=("robot", "base"), required=True)
     ap.add_argument("--robot", default="")
     ap.add_argument("--robots", default="")
-    ap.add_argument("--base", default="willow")
+    ap.add_argument("--base", default="base1")
     ap.add_argument("--exec-delay", type=float, default=0.5)
     ap.add_argument("--tf-x", type=float, default=1.0)
     ap.add_argument("--harness-tag", default="")  # only to find strays

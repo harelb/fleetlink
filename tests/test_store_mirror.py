@@ -25,12 +25,10 @@ from fleetlink.receiver import Receiver  # noqa: E402
 from fleetlink.store_mirror import StoreMirror, StoreTail  # noqa: E402
 from fleetlink.transport import LinkEmulator, VirtualClock  # noqa: E402
 
-AGENTIC_NAV = pathlib.Path(
-    os.environ.get(
-        "AGENTIC_NAV_SRC",
-        pathlib.Path(__file__).resolve().parents[2] / "agentic_navigation",
-    )
-)
+# an agentic_navigation source checkout (its SAM3 keyframe loader); the test that
+# needs it is skipped unless AGENTIC_NAV_SRC is set
+AGENTIC_NAV_SRC = os.environ.get("AGENTIC_NAV_SRC", "")
+AGENTIC_NAV = pathlib.Path(AGENTIC_NAV_SRC) if AGENTIC_NAV_SRC else None
 
 W, H = 64, 48
 
@@ -170,6 +168,8 @@ def test_mirror_keyframes_and_resume_across_restarts(tmp_path):
 
 @needs_tail
 def test_mirror_store_loads_with_sam3_keyframe_loader(tmp_path):
+    if AGENTIC_NAV is None:
+        pytest.skip("set AGENTIC_NAV_SRC to an agentic_navigation checkout")
     if not (AGENTIC_NAV / "agentic_navigation").is_dir():
         pytest.skip("agentic_navigation checkout not found")
     sys.path.insert(0, str(AGENTIC_NAV))

@@ -3,6 +3,7 @@ guards from the platform topics, plan progress, body frame, and the on-demand
 C3 lidar stream end to end (agent → LinkEmulator → Receiver)."""
 
 import numpy as np
+import pytest
 import yaml
 from helpers import RecordingTransport, env_bytes
 
@@ -19,7 +20,7 @@ from fleetlink.receiver import Receiver
 from fleetlink.transport import LinkEmulator, VirtualClock
 
 POSE = {"x": 0.0, "y": 0.0, "z": 0.0, "qw": 1.0, "qx": 0.0, "qy": 0.0, "qz": 0.0,
-        "frame": "gauss/map", "t": 0.0}  # fmt: skip
+        "frame": "robot2/map", "t": 0.0}  # fmt: skip
 
 
 def _agent(**cfg):
@@ -70,18 +71,18 @@ def test_phoenix_state_has_progress_and_lidar_keys():
 
 
 def test_body_frame_and_platform_resolution(tmp_path):
-    assert default_body_frame("gauss", "phoenix") == "gauss/base_link"
-    assert default_body_frame("hamilton", "spot") == "hamilton/body"
+    assert default_body_frame("robot2", "phoenix") == "robot2/base_link"
+    assert default_body_frame("robot3", "spot") == "robot3/body"
     topo = tmp_path / "topology.yaml"
     topo.write_text(yaml.safe_dump({"machines": {
-        "gauss": {"role": "robot", "platform_type": "husky"},
-        "hamilton": {"role": "robot"},
+        "robot2": {"role": "robot", "platform_type": "husky"},
+        "robot3": {"role": "robot"},
     }}))  # fmt: skip
-    assert resolve_platform("gauss", "", str(topo)) == "phoenix"
-    assert resolve_platform("hamilton", "", str(topo)) == "spot"
+    assert resolve_platform("robot2", "", str(topo)) == "phoenix"
+    assert resolve_platform("robot3", "", str(topo)) == "spot"
     assert resolve_platform("nobody", "", str(topo)) == "spot"
-    assert resolve_platform("hamilton", "Phoenix", str(topo)) == "phoenix"  # param wins
-    assert resolve_platform("gauss", "", str(tmp_path / "missing.yaml")) == "spot"
+    assert resolve_platform("robot3", "Phoenix", str(topo)) == "phoenix"  # param wins
+    assert resolve_platform("robot2", "", str(tmp_path / "missing.yaml")) == "spot"
 
 
 # ----------------------------------------------------------------------- guards
@@ -112,7 +113,7 @@ def test_phoenix_guards_adapter():
 
 
 def test_phoenix_progress_distance_done_and_frames():
-    plan = {"plan_id": "5.000000007", "stamp": 5.0, "frame": "gauss/map",
+    plan = {"plan_id": "5.000000007", "stamp": 5.0, "frame": "robot2/map",
             "end": [3.0, 4.0, 0.0], "left": True}  # fmt: skip
     p = phoenix_progress(plan, POSE)
     assert p == {
@@ -135,7 +136,7 @@ def test_phoenix_progress_distance_done_and_frames():
 def test_phoenix_progress_in_state():
     tr, clock, core = _agent(platform="phoenix")
     core.on_plan_path(
-        [[0, 0, 0], [1, 1, 0], [0.5, 0.2, 0]], "gauss/map", 1700000000, 42
+        [[0, 0, 0], [1, 1, 0], [0.5, 0.2, 0]], "robot2/map", 1700000000, 42
     )
     _run(clock, core, 0.5)
     prog = _state(tr)["phoenix_progress"]
@@ -153,18 +154,18 @@ def test_phoenix_progress_in_state():
 def test_phoenix_round_trip_done_only_after_leaving_the_goal():
     tr, clock, core = _agent(platform="phoenix")
     loop = [[0, 0, 0], [3, 0, 0], [3, 3, 0], [0, 0.2, 0]]
-    core.on_plan_path(loop, "gauss/map", 10, 1)
+    core.on_plan_path(loop, "robot2/map", 10, 1)
     for x in (0.0, 0.5, 0.9):  # wiggling near the start (within 1 m of the end)
         core.on_pose(dict(POSE, x=x))
         _run(clock, core, 0.3)
         assert _state(tr)["phoenix_progress"]["done"] is False
     core.on_pose(dict(POSE, x=1.5))  # left the goal
-    core.on_plan_path(loop, "gauss/map", 10, 1)  # the same plan again keeps that
+    core.on_plan_path(loop, "robot2/map", 10, 1)  # the same plan again keeps that
     core.on_pose(dict(POSE, x=0.1))
     _run(clock, core, 0.3)
     assert _state(tr)["phoenix_progress"]["done"] is True
     # a new plan starts over
-    core.on_plan_path(loop, "gauss/map", 11, 0)
+    core.on_plan_path(loop, "robot2/map", 11, 0)
     _run(clock, core, 0.3)
     p = _state(tr)["phoenix_progress"]
     assert p["plan_id"] == "11.000000000" and p["done"] is False
@@ -173,14 +174,14 @@ def test_phoenix_round_trip_done_only_after_leaving_the_goal():
 def test_phoenix_short_or_single_pose_path_done_at_once():
     for path in ([[0.3, 0.0, 0.0]], [[0, 0, 0], [0.4, 0.3, 0.0]]):
         tr, clock, core = _agent(platform="phoenix")
-        core.on_plan_path(path, "gauss/map", 7, 0)
+        core.on_plan_path(path, "robot2/map", 7, 0)
         _run(clock, core, 0.3)
         p = _state(tr)["phoenix_progress"]
         assert p["done"] is True and p["dist_to_goal_m"] < 1.0
     # a plan received while the robot is already far from the end: left at once
     tr, clock, core = _agent(platform="phoenix")
     core.on_pose(dict(POSE, x=5.0))
-    core.on_plan_path([[5, 0, 0], [0, 0, 0]], "gauss/map", 8, 0)
+    core.on_plan_path([[5, 0, 0], [0, 0, 0]], "robot2/map", 8, 0)
     core.on_pose(dict(POSE, x=0.2))
     _run(clock, core, 0.3)
     assert _state(tr)["phoenix_progress"]["done"] is True
@@ -377,6 +378,7 @@ def test_bad_cloud_reports_an_error_but_keeps_the_lidar_available():
 
 
 def test_lidar_subscription_depth1_best_effort_own_group():
+    pytest.importorskip("rclpy")
     from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
     from rclpy.qos import DurabilityPolicy, HistoryPolicy, ReliabilityPolicy
 

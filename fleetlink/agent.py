@@ -1743,7 +1743,7 @@ class AgentNode:
             p(
                 "cameras",
                 [
-                    # euclid: euclid_zed/rgb/image_rect_color
+                    # robot1: euclid_zed/rgb/image_rect_color
                     f"rgb={robot}_zed/rgb/image_rect_color",
                     "overlay=semantic_overlay/image_raw",
                 ],

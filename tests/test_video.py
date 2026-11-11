@@ -1,6 +1,7 @@
 """Live camera video (C5, API.md §12): bitstream parsing, ffmpeg encoders,
 keepalive expiry, the C5 drop policy, the JPEG fallback and the receiver."""
 
+import importlib.util
 import os
 import shutil
 import struct
@@ -202,6 +203,8 @@ def _frames(tr, cam="rgb"):
 
 
 def test_video_keepalive_expiry_and_stop():
+    if not (importlib.util.find_spec("cv2") or importlib.util.find_spec("PIL")):
+        pytest.skip("JPEG frames need OpenCV or Pillow")
     tr, clock, core = _agent()
     _req(tr, {"camera": "rgb", "fps": 5, "codec": "jpeg", "width": 80}, "a")
     _run(clock, core, 2.0)

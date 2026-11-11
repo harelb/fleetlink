@@ -55,7 +55,7 @@ class Pair:
 
     def new_robot(self, **extra):
         return RelayCore(
-            "euclid", "robot", self.link.robot, self.robot_cfg, platform="spot",
+            "robot1", "robot", self.link.robot, self.robot_cfg, platform="spot",
             clock=lambda: self.clk() + self.skew,
             on_message=lambda e, d, m: self.got["robot"].append((e.name, bytes(d))) or 1,
             type_hash=self.robot_type_hash or (lambda t: "H:" + t),
@@ -64,7 +64,7 @@ class Pair:
 
     def new_base(self, **extra):
         return RelayCore(
-            "euclid", "base", self.link.base, self.cfg, base="willow", clock=self.clk,
+            "robot1", "base", self.link.base, self.cfg, base="base1", clock=self.clk,
             on_message=lambda e, d, m: self.got["base"].append((e.name, bytes(d))),
             on_event=lambda k, i: self.events.append((k, i)),
             type_hash=lambda t: "H:" + t,
@@ -115,11 +115,11 @@ def test_config_rejects(bad, msg):
 def test_config_rejects_both_directions_after_templating():
     cfg = RelayConfig({"topics": [
         {"topic": "/{robot}/x", "type": "a/msg/B", "dir": "up", "mode": "latest"},
-        {"topic": "/euclid/x", "type": "a/msg/B", "dir": "down", "mode": "latest"},
+        {"topic": "/robot1/x", "type": "a/msg/B", "dir": "down", "mode": "latest"},
     ]})  # fmt: skip
-    cfg.resolve("hamilton")  # fine for another robot
+    cfg.resolve("robot3")  # fine for another robot
     with pytest.raises(RelayConfigError, match="twice"):
-        cfg.resolve("euclid")
+        cfg.resolve("robot1")
 
 
 # ----------------------------------------------------------------- modes
@@ -131,28 +131,28 @@ def test_wire_keys_and_payload():
     # what crosses the link, in each direction
     pr.link.robot.subscribe("adt4/**", lambda k, d: seen.append((k, codec.unpack(d))))
     pr.link.base.subscribe("adt4/**", lambda k, d: seen.append((k, codec.unpack(d))))
-    pr.base.publish("/euclid/plan", b"PLAN")
+    pr.base.publish("/robot1/plan", b"PLAN")
     pr.run(0.5)
     k, env = next((k, e) for k, e in seen if e["stream"] == "ros/down")
-    assert k == "adt4/euclid/ros/down/euclid/plan"
+    assert k == "adt4/robot1/ros/down/robot1/plan"
     p = env["p"]
-    assert p["topic"] == "/euclid/plan" and p["type"] == "pkg/msg/Plan"
+    assert p["topic"] == "/robot1/plan" and p["type"] == "pkg/msg/Plan"
     assert p["th"] == "H:pkg/msg/Plan" and p["mode"] == "latest_reliable"
     assert p["data"] == b"PLAN" and p["tseq"] == 0 and p["id"]
     acks = [
-        e for k, e in seen if k == "adt4/euclid/ros/ack/up" and e["p"]["op"] == "ack"
+        e for k, e in seen if k == "adt4/robot1/ros/ack/up" and e["p"]["op"] == "ack"
     ]
     assert acks and acks[0]["p"]["ok"] and acks[0]["p"]["subs"] == 1
-    assert any(e["p"]["op"] == "hb" for k, e in seen if k == "adt4/euclid/ros/ack/up")
-    assert pr.data("robot", "/euclid/plan") == [b"PLAN"]
+    assert any(e["p"]["op"] == "hb" for k, e in seen if k == "adt4/robot1/ros/ack/up")
+    assert pr.data("robot", "/robot1/plan") == [b"PLAN"]
     st = pr.base.status()
-    assert st["topics"]["/euclid/plan"]["acked"] == 1
-    assert st["topics"]["/euclid/plan"]["subs"] == 1
+    assert st["topics"]["/robot1/plan"]["acked"] == 1
+    assert st["topics"]["/robot1/plan"]["subs"] == 1
     assert (
         "ack",
         {
-            "robot": "euclid",
-            "topic": "/euclid/plan",
+            "robot": "robot1",
+            "topic": "/robot1/plan",
             "ok": True,
             "err": None,
             "subs": 1,
@@ -165,11 +165,11 @@ def test_reliable_in_order_exactly_once_under_loss():
     pr.run(2.0)
     sent = [f"cmd{i}".encode() for i in range(20)]
     for i, m in enumerate(sent):
-        pr.base.publish("/euclid/cmd", m)
+        pr.base.publish("/robot1/cmd", m)
         pr.run(0.1)
     pr.run(8.0)
-    assert pr.data("robot", "/euclid/cmd") == sent
-    st = pr.base.status()["topics"]["/euclid/cmd"]
+    assert pr.data("robot", "/robot1/cmd") == sent
+    st = pr.base.status()["topics"]["/robot1/cmd"]
     assert st["pending"] == 0 and st["resent"] > 0 and st["gave_up"] == 0
     assert pr.robot.status()["loss"] > 0.05  # measured from seq gaps
 
@@ -179,10 +179,10 @@ def test_reliable_up_with_loss_and_queue_cap():
     pr.run(1.0)
     pr.link.close_transport(3.0)
     for i in range(8):  # cap 5: the three oldest are dropped
-        pr.robot.publish("/euclid/result", f"r{i}".encode())
+        pr.robot.publish("/robot1/result", f"r{i}".encode())
     pr.run(10.0)
-    assert pr.data("base", "/euclid/result") == [f"r{i}".encode() for i in range(3, 8)]
-    assert pr.robot.status()["topics"]["/euclid/result"]["overflow"] == 3
+    assert pr.data("base", "/robot1/result") == [f"r{i}".encode() for i in range(3, 8)]
+    assert pr.robot.status()["topics"]["/robot1/result"]["overflow"] == 3
 
 
 def test_reliable_hole_given_up_does_not_block_later_messages():
@@ -191,14 +191,14 @@ def test_reliable_hole_given_up_does_not_block_later_messages():
     pr = Pair(max_tries=1)
     pr.run(1.0)
     pr.link.close_transport(0.3)
-    pr.base.publish("/euclid/cmd", b"lost")
+    pr.base.publish("/robot1/cmd", b"lost")
     pr.run(0.5)
-    pr.base.publish("/euclid/cmd", b"after")
+    pr.base.publish("/robot1/cmd", b"after")
     pr.run(0.5)
-    assert pr.data("robot", "/euclid/cmd") == []  # held behind the hole
+    assert pr.data("robot", "/robot1/cmd") == []  # held behind the hole
     pr.run(3.0)
-    assert pr.data("robot", "/euclid/cmd") == [b"after"]
-    assert pr.base.status()["topics"]["/euclid/cmd"]["gave_up"] == 1
+    assert pr.data("robot", "/robot1/cmd") == [b"after"]
+    assert pr.base.status()["topics"]["/robot1/cmd"]["gave_up"] == 1
 
 
 def test_latest_reliable_newer_supersedes_pending_retry():
@@ -206,11 +206,11 @@ def test_latest_reliable_newer_supersedes_pending_retry():
     pr.run(1.0)
     pr.link.close_transport(2.0)
     for v in (b"v1", b"v2", b"v3"):
-        pr.base.publish("/euclid/plan", v)
+        pr.base.publish("/robot1/plan", v)
         pr.run(0.2)
     pr.run(4.0)
-    assert pr.data("robot", "/euclid/plan") == [b"v3"]
-    st = pr.base.status()["topics"]["/euclid/plan"]
+    assert pr.data("robot", "/robot1/plan") == [b"v3"]
+    st = pr.base.status()["topics"]["/robot1/plan"]
     assert st["superseded"] == 2 and st["pending"] == 0
 
 
@@ -218,10 +218,10 @@ def test_latest_rate_limited_keeps_newest():
     pr = Pair()
     pr.run(1.0)
     for i in range(10):  # 10 values in 1 s at rate_hz 2
-        pr.robot.publish("/euclid/guards", f"g{i}".encode())
+        pr.robot.publish("/robot1/guards", f"g{i}".encode())
         pr.run(0.1)
     pr.run(1.0)
-    got = pr.data("base", "/euclid/guards")
+    got = pr.data("base", "/robot1/guards")
     assert 2 <= len(got) <= 3
     assert got[-1] == b"g9"
 
@@ -232,9 +232,9 @@ def test_ttl_uses_heartbeat_clock_offset():
     pr.run(3.0)
     assert pr.robot.clock_offset == pytest.approx(-100.0, abs=0.06)
     assert pr.base.clock_offset == pytest.approx(100.0, abs=0.06)
-    pr.base.publish("/euclid/cmd", b"pause")
+    pr.base.publish("/robot1/cmd", b"pause")
     pr.run(1.0)
-    assert pr.data("robot", "/euclid/cmd") == [b"pause"]
+    assert pr.data("robot", "/robot1/cmd") == [b"pause"]
     assert pr.robot.status()["rtt"] == pytest.approx(0.1, abs=0.06)
 
 
@@ -244,14 +244,14 @@ def test_ttl_not_checked_before_clock_offset_known(skew):
     heartbeat: the receiver cannot correct the envelope ``t`` yet, so it must
     not reject the plan as expired (or as from the future); it is delivered."""
     pr = Pair(robot_skew=skew)
-    pr.base.publish("/euclid/plan", b"P1")
-    pr.base.publish("/euclid/cmd", b"pause")  # reliable, ttl 10
+    pr.base.publish("/robot1/plan", b"P1")
+    pr.base.publish("/robot1/cmd", b"pause")  # reliable, ttl 10
     pr.run(5.0)
-    assert pr.data("robot", "/euclid/plan") == [b"P1"]
-    assert pr.data("robot", "/euclid/cmd") == [b"pause"]
+    assert pr.data("robot", "/robot1/plan") == [b"P1"]
+    assert pr.data("robot", "/robot1/cmd") == [b"pause"]
     st = pr.robot.status()["topics"]
-    assert st["/euclid/plan"]["expired"] == 0 and st["/euclid/cmd"]["expired"] == 0
-    assert pr.base.status()["topics"]["/euclid/plan"]["rejected"] == 0
+    assert st["/robot1/plan"]["expired"] == 0 and st["/robot1/cmd"]["expired"] == 0
+    assert pr.base.status()["topics"]["/robot1/plan"]["rejected"] == 0
     # once the offset is known, the TTL is enforced again (corrected)
     assert pr.robot.clock_offset == pytest.approx(-skew, abs=0.06)
 
@@ -266,20 +266,20 @@ def test_ttl_after_peer_restart_uses_heartbeat_offset():
     pr.clk.advance(0.05)
     pr.link.advance()
     pr.base.tick()  # one heartbeat from the new base, no round trip yet
-    pr.base.publish("/euclid/cmd", b"pause")
+    pr.base.publish("/robot1/cmd", b"pause")
     pr.run(3.0)
-    assert pr.data("robot", "/euclid/cmd") == [b"pause"]
-    assert pr.robot.status()["topics"]["/euclid/cmd"]["expired"] == 0
+    assert pr.data("robot", "/robot1/cmd") == [b"pause"]
+    assert pr.robot.status()["topics"]["/robot1/cmd"]["expired"] == 0
 
 
 def test_ttl_expired_command_never_delivered():
     pr = Pair()
     pr.run(1.0)
     pr.link.close_transport(15.0)  # longer than the cmd's ttl_s (10)
-    pr.base.publish("/euclid/cmd", b"stale")
+    pr.base.publish("/robot1/cmd", b"stale")
     pr.run(20.0)
-    assert pr.data("robot", "/euclid/cmd") == []
-    assert pr.base.status()["topics"]["/euclid/cmd"]["expired"] == 1
+    assert pr.data("robot", "/robot1/cmd") == []
+    assert pr.base.status()["topics"]["/robot1/cmd"]["expired"] == 1
 
 
 def test_ttl_rejected_on_receiver_with_negative_ack():
@@ -287,22 +287,22 @@ def test_ttl_rejected_on_receiver_with_negative_ack():
     cfg = {**CFG, "topics": [dict(CFG["topics"][1], ttl_s=0.3)]}
     pr = Pair(cfg=cfg, latency=0.5)
     pr.run(3.0)
-    pr.base.publish("/euclid/cmd", b"late")
+    pr.base.publish("/robot1/cmd", b"late")
     pr.run(3.0)
-    assert pr.data("robot", "/euclid/cmd") == []
-    assert pr.robot.status()["topics"]["/euclid/cmd"]["expired"] >= 1
+    assert pr.data("robot", "/robot1/cmd") == []
+    assert pr.robot.status()["topics"]["/robot1/cmd"]["expired"] >= 1
 
 
 def test_no_replay_after_robot_restart():
     pr = Pair()
     pr.run(2.0)
-    pr.base.publish("/euclid/plan", b"old plan")
+    pr.base.publish("/robot1/plan", b"old plan")
     pr.run(1.0)
-    assert pr.data("robot", "/euclid/plan") == [b"old plan"]
+    assert pr.data("robot", "/robot1/plan") == [b"old plan"]
     # radio drops; the base queues a command; the robot reboots meanwhile
     pr.link.close_transport(5.0)
-    pr.base.publish("/euclid/cmd", b"pause")
-    pr.base.publish("/euclid/plan", b"new plan")
+    pr.base.publish("/robot1/cmd", b"pause")
+    pr.base.publish("/robot1/plan", b"new plan")
     pr.run(1.0)
     old_epoch = pr.robot.epoch
     pr.robot.close()
@@ -313,12 +313,12 @@ def test_no_replay_after_robot_restart():
     assert pr.got["robot"] == []  # nothing re-run on the rebooted robot
     st = pr.base.status()
     assert st["peer_restarts"] == 1 and st["peer_epoch"] == pr.robot.epoch
-    assert st["topics"]["/euclid/cmd"]["dropped_restart"] == 1
-    assert st["topics"]["/euclid/plan"]["dropped_restart"] == 1
+    assert st["topics"]["/robot1/cmd"]["dropped_restart"] == 1
+    assert st["topics"]["/robot1/plan"]["dropped_restart"] == 1
     # the link itself works for new commands
-    pr.base.publish("/euclid/cmd", b"resume")
+    pr.base.publish("/robot1/cmd", b"resume")
     pr.run(1.0)
-    assert pr.data("robot", "/euclid/cmd") == [b"resume"]
+    assert pr.data("robot", "/robot1/cmd") == [b"resume"]
 
 
 def test_stale_epoch_retry_rejected_by_new_robot():
@@ -328,17 +328,17 @@ def test_stale_epoch_retry_rejected_by_new_robot():
         hb_period=100.0
     )  # no heartbeats: the base learns the epoch from data only
     pr.base.tick()
-    pr.robot.publish("/euclid/result", b"hello")
+    pr.robot.publish("/robot1/result", b"hello")
     pr.run(1.0)
     pr.link.close_transport(2.0)
-    pr.base.publish("/euclid/cmd", b"pause")
+    pr.base.publish("/robot1/cmd", b"pause")
     pr.robot.close()
     pr.robot = pr.new_robot(hb_period=100.0)
     pr.run(4.0)
-    assert pr.data("robot", "/euclid/cmd") == []
-    assert pr.robot.status()["topics"]["/euclid/cmd"]["stale_epoch"] >= 1
+    assert pr.data("robot", "/robot1/cmd") == []
+    assert pr.robot.status()["topics"]["/robot1/cmd"]["stale_epoch"] >= 1
     # the nack itself reveals the new epoch: the base drops the command for good
-    st = pr.base.status()["topics"]["/euclid/cmd"]
+    st = pr.base.status()["topics"]["/robot1/cmd"]
     assert st["dropped_restart"] == 1 and st["pending"] == 0
 
 
@@ -348,18 +348,18 @@ def test_replay_on_resync_entries_resent_to_new_base():
     that would publish it twice on the base graph."""
     pr = Pair()
     pr.run(1.0)
-    pr.robot.publish("/euclid/result", b"done 3")
-    pr.robot.publish("/euclid/guards", b"g")
-    pr.robot.publish("/euclid/static", b"tf")
+    pr.robot.publish("/robot1/result", b"done 3")
+    pr.robot.publish("/robot1/guards", b"g")
+    pr.robot.publish("/robot1/static", b"tf")
     pr.run(1.0)
-    assert pr.data("base", "/euclid/result") == [b"done 3"]
+    assert pr.data("base", "/robot1/result") == [b"done 3"]
     pr.base.close()
     pr.got["base"].clear()
     pr.base = pr.new_base()
     pr.run(3.0)
-    assert pr.data("base", "/euclid/static") == [b"tf"]  # state: replayed
-    assert pr.data("base", "/euclid/result") == []  # acked event: not again
-    assert pr.data("base", "/euclid/guards") == []  # no replay_on_resync
+    assert pr.data("base", "/robot1/static") == [b"tf"]  # state: replayed
+    assert pr.data("base", "/robot1/result") == []  # acked event: not again
+    assert pr.data("base", "/robot1/guards") == []  # no replay_on_resync
 
 
 def test_unacked_result_reaches_restarted_base_exactly_once():
@@ -368,13 +368,13 @@ def test_unacked_result_reaches_restarted_base_exactly_once():
     pr = Pair()
     pr.run(1.0)
     pr.link.close_transport(2.0)
-    pr.robot.publish("/euclid/result", b"done 4")
+    pr.robot.publish("/robot1/result", b"done 4")
     pr.run(1.0)
     pr.base.close()
     pr.base = pr.new_base()
     pr.run(5.0)
-    assert pr.data("base", "/euclid/result") == [b"done 4"]
-    st = pr.robot.status()["topics"]["/euclid/result"]
+    assert pr.data("base", "/robot1/result") == [b"done 4"]
+    st = pr.robot.status()["topics"]["/robot1/result"]
     assert st["pending"] == 0 and st["acked"] == 1
 
 
@@ -387,9 +387,9 @@ def test_stale_epoch_nack_does_not_drop_replayed_result():
     pr = Pair()
     pr.run(3.0)
     pr.link.close_transport(3.0)  # radio out t=3..6: the old base never sees it
-    pr.robot.publish("/euclid/result", b"R1")
+    pr.robot.publish("/robot1/result", b"R1")
     pr.run(1.5)
-    o = pr.robot.out["/euclid/result"]
+    o = pr.robot.out["/robot1/result"]
     assert [p.to for p in o.pending.values()] == [pr.base.epoch]
     pr.base.close()
     pr.got["base"].clear()
@@ -400,19 +400,19 @@ def test_stale_epoch_nack_does_not_drop_replayed_result():
         pr.robot.tick()
     assert pr.robot.peer_restarts == 1
     pr.run(10.0)
-    assert pr.data("base", "/euclid/result") == [b"R1"]
-    st = pr.robot.status()["topics"]["/euclid/result"]
+    assert pr.data("base", "/robot1/result") == [b"R1"]
+    st = pr.robot.status()["topics"]["/robot1/result"]
     assert st["pending"] == 0 and st["stale_epoch"] >= 1 and st["rejected"] == 0
 
 
 def test_type_hash_mismatch_rejected_and_counted():
     pr = Pair(robot_type_hash=lambda t: "OTHER:" + t)
     pr.run(1.0)
-    pr.base.publish("/euclid/plan", b"PLAN")
+    pr.base.publish("/robot1/plan", b"PLAN")
     pr.run(2.0)
-    assert pr.data("robot", "/euclid/plan") == []
-    assert pr.robot.status()["topics"]["/euclid/plan"]["type_mismatch"] == 1
-    st = pr.base.status()["topics"]["/euclid/plan"]
+    assert pr.data("robot", "/robot1/plan") == []
+    assert pr.robot.status()["topics"]["/robot1/plan"]["type_mismatch"] == 1
+    st = pr.base.status()["topics"]["/robot1/plan"]
     assert st["rejected"] == 1 and st["err"] == "type mismatch" and st["pending"] == 0
 
 
@@ -456,14 +456,14 @@ def test_service_round_trip_both_directions_under_loss():
     pr.robot.on_service = serve("robot")
     pr.run(1.0)
     up, down = [], []
-    pr.robot.call("/euclid/hold", b"h", lambda d, e: up.append((d, e)))
-    pr.base.call("/euclid/save", b"s", lambda d, e: down.append((d, e)))
+    pr.robot.call("/robot1/hold", b"h", lambda d, e: up.append((d, e)))
+    pr.base.call("/robot1/save", b"s", lambda d, e: down.append((d, e)))
     pr.run(4.0)
-    assert up == [(b"re:h@/euclid/hold//willow/hold", None)]
-    assert down == [(b"re:s@/euclid/save//euclid/save", None)]
+    assert up == [(b"re:h@/robot1/hold//base1/hold", None)]
+    assert down == [(b"re:s@/robot1/save//robot1/save", None)]
     assert calls == {"base": 1, "robot": 1}  # retries deduped by id
     with pytest.raises(KeyError):
-        pr.robot.call("/euclid/save", b"", lambda d, e: None)  # wrong direction
+        pr.robot.call("/robot1/save", b"", lambda d, e: None)  # wrong direction
 
 
 def test_service_timeout():
@@ -471,12 +471,12 @@ def test_service_timeout():
     pr.base.on_service = lambda s, req, reply: None  # never answers
     pr.run(1.0)
     out = []
-    pr.robot.call("/euclid/hold", b"h", lambda d, e: out.append((d, e)))
+    pr.robot.call("/robot1/hold", b"h", lambda d, e: out.append((d, e)))
     pr.run(4.9)
     assert out == []
     pr.run(0.2)
     assert out == [(None, "timeout")]
-    assert pr.robot.status()["services"]["/euclid/hold"]["timeouts"] == 1
+    assert pr.robot.status()["services"]["/robot1/hold"]["timeouts"] == 1
 
 
 def test_service_timeout_when_link_is_down():
@@ -485,7 +485,7 @@ def test_service_timeout_when_link_is_down():
     pr.run(1.0)
     pr.link.close_transport(30.0)
     out = []
-    pr.base.call("/euclid/save", b"s", lambda d, e: out.append((d, e)))
+    pr.base.call("/robot1/save", b"s", lambda d, e: out.append((d, e)))
     pr.run(3.5)
     assert out == [(None, "timeout")]
 
@@ -519,15 +519,15 @@ def test_strict_ttl_drops_until_clock_offset_measured():
     """Before the first heartbeat round trip, a strict entry cannot tell how old a
     velocity command is: it is dropped, not applied."""
     pr = Pair(cfg=TELEOP, robot_skew=45.0)
-    pr.base.publish("/euclid/cmd_vel", b"v0")  # at link-up, no heartbeat yet
+    pr.base.publish("/robot1/cmd_vel", b"v0")  # at link-up, no heartbeat yet
     pr.run(0.2)
-    assert pr.data("robot", "/euclid/cmd_vel") == []
-    assert pr.robot.status()["topics"]["/euclid/cmd_vel"]["expired"] == 1
+    assert pr.data("robot", "/robot1/cmd_vel") == []
+    assert pr.robot.status()["topics"]["/robot1/cmd_vel"]["expired"] == 1
     pr.run(3.0)  # offset measured
     assert pr.robot.clock_offset is not None
-    pr.base.publish("/euclid/cmd_vel", b"v1")
+    pr.base.publish("/robot1/cmd_vel", b"v1")
     pr.run(0.3)
-    assert pr.data("robot", "/euclid/cmd_vel") == [b"v1"]
+    assert pr.data("robot", "/robot1/cmd_vel") == [b"v1"]
 
 
 def test_strict_ttl_drops_radio_delayed_velocity():
@@ -537,21 +537,21 @@ def test_strict_ttl_drops_radio_delayed_velocity():
     pr.run(5.0)
     assert pr.robot.clock_offset is not None
     for i in range(10):
-        pr.base.publish("/euclid/cmd_vel", b"v%d" % i)
+        pr.base.publish("/robot1/cmd_vel", b"v%d" % i)
         pr.run(0.1)
     pr.run(2.0)
-    assert pr.data("robot", "/euclid/cmd_vel") == []
-    assert pr.robot.status()["topics"]["/euclid/cmd_vel"]["expired"] >= 1
+    assert pr.data("robot", "/robot1/cmd_vel") == []
+    assert pr.robot.status()["topics"]["/robot1/cmd_vel"]["expired"] >= 1
 
 
 def test_velocity_stream_delivered_on_good_link():
     pr = Pair(cfg=TELEOP, latency=0.05)
     pr.run(3.0)
     for i in range(10):
-        pr.base.publish("/euclid/cmd_vel", b"v%d" % i)
+        pr.base.publish("/robot1/cmd_vel", b"v%d" % i)
         pr.run(0.1)
     pr.run(0.3)
-    got = pr.data("robot", "/euclid/cmd_vel")
+    got = pr.data("robot", "/robot1/cmd_vel")
     assert len(got) >= 8 and got[-1] == b"v9"
 
 
@@ -561,11 +561,11 @@ def test_stale_latest_value_dropped_on_sender():
     cfg = {"version": 1, "topics": [dict(TELEOP["topics"][0], rate_hz=0.5)]}
     pr = Pair(cfg=cfg)
     pr.run(3.0)
-    pr.base.publish("/euclid/cmd_vel", b"go")
-    pr.base.publish("/euclid/cmd_vel", b"late")  # waits ~2 s for the next slot
+    pr.base.publish("/robot1/cmd_vel", b"go")
+    pr.base.publish("/robot1/cmd_vel", b"late")  # waits ~2 s for the next slot
     pr.run(3.0)
-    assert pr.data("robot", "/euclid/cmd_vel") == [b"go"]
-    assert pr.base.status()["topics"]["/euclid/cmd_vel"]["expired"] == 1
+    assert pr.data("robot", "/robot1/cmd_vel") == [b"go"]
+    assert pr.base.status()["topics"]["/robot1/cmd_vel"]["expired"] == 1
 
 
 def test_unavailable_message_types_are_dropped_not_fatal():

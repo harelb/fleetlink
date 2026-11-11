@@ -22,13 +22,13 @@ def _grid(w=40, h=30, seed=0):
 def test_grid_round_trip():
     g = _grid()
     enc = media.encode_grid(
-        "euclid/map", 0.1, [1.0, -2.0, 0.3, 0.5], 40, 30, g.tobytes(), 7.0
+        "robot1/map", 0.1, [1.0, -2.0, 0.3, 0.5], 40, 30, g.tobytes(), 7.0
     )
     wire = codec.unpack(codec.pack(enc))
     out = media.decode_grid(wire)
     assert out.shape == (30, 40) and out.dtype == np.int8
     assert np.array_equal(out, g)
-    assert wire["origin"] == [1.0, -2.0, 0.3, 0.5] and wire["frame"] == "euclid/map"
+    assert wire["origin"] == [1.0, -2.0, 0.3, 0.5] and wire["frame"] == "robot1/map"
     assert len(wire["data"]) < g.size  # zlib
     with pytest.raises(ValueError):
         media.encode_grid("m", 0.1, [0, 0, 0, 0], 41, 30, g.tobytes())

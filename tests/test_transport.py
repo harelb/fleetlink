@@ -17,8 +17,8 @@ def _run(link, until, dt=0.01):
 
 def test_key_matches():
     assert key_matches("adt4/**", "adt4/r/mesh/tile/1_2_0")
-    assert key_matches("adt4/*/state", "adt4/euclid/state")
-    assert not key_matches("adt4/*/state", "adt4/euclid/dsg/delta")
+    assert key_matches("adt4/*/state", "adt4/robot1/state")
+    assert not key_matches("adt4/*/state", "adt4/robot1/dsg/delta")
     assert key_matches("adt4/r/ctl/req", "adt4/r/ctl/req")
 
 

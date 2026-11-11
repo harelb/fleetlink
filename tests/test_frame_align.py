@@ -38,17 +38,17 @@ class FakeBuffer:
 
 
 def test_lookup_ok_relocalized():
-    buf = FakeBuffer({("map", "hamilton/odom"): _tf(0.53, 0.07, 0.7, 1, 0, 0, 0)})
-    fa = lookup_frame_align(buf, "map", "hamilton/odom")
+    buf = FakeBuffer({("map", "robot3/odom"): _tf(0.53, 0.07, 0.7, 1, 0, 0, 0)})
+    fa = lookup_frame_align(buf, "map", "robot3/odom")
     assert fa["ok"] is True and fa["reason"] == ""
-    assert (fa["parent"], fa["child"]) == ("map", "hamilton/odom")
+    assert (fa["parent"], fa["child"]) == ("map", "robot3/odom")
     assert fa["T"] == [0.53, 0.07, 0.7, 1.0, 0.0, 0.0, 0.0]
     assert fa["stamp"] == 100.5
-    assert buf.calls == [("map", "hamilton/odom")]  # parent <- child
+    assert buf.calls == [("map", "robot3/odom")]  # parent <- child
 
 
 def test_lookup_not_relocalized():
-    fa = lookup_frame_align(FakeBuffer(), "map", "hamilton/odom")
+    fa = lookup_frame_align(FakeBuffer(), "map", "robot3/odom")
     assert fa["ok"] is False and fa["T"] is None
     assert fa["reason"].startswith("not relocalized: LookupError")
     assert len(fa["reason"]) <= 200

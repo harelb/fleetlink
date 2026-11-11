@@ -5,9 +5,10 @@ camera wants, the budget split and the cheap scaler."""
 import subprocess
 import time
 
-import cv2
 import numpy as np
 import pytest
+
+cv2 = pytest.importorskip("cv2")
 from helpers import RecordingTransport, env_bytes
 from test_video import _has_encoder
 
