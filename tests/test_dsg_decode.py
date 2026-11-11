@@ -1,4 +1,4 @@
-"""A5 regression: the agent's DsgUpdate decode path (``decode_dsg`` as used by
+"""Regression: the agent's DsgUpdate decode path (``decode_dsg`` as used by
 ``AgentNode._decode_loop``) on real ``to_binary`` payloads reports the right node
 count, streams non-trivial C2 deltas, and flags a payload whose nodes the
 imported spark_dsg silently dropped."""
@@ -16,12 +16,8 @@ from fleetlink.transport import VirtualClock
 
 dsg = pytest.importorskip("spark_dsg")
 
-REAL_DSG = os.path.expanduser(
-    os.environ.get(
-        "FLEETLINK_REAL_DSG",
-        "~/adt4_output/imgstore_winA_on4_20261017/hydra/backend/dsg_with_mesh.json",
-    )
-)
+# a real Hydra backend dsg_with_mesh.json; the tests that need one skip without it
+REAL_DSG = os.path.expanduser(os.environ.get("FLEETLINK_REAL_DSG", ""))
 
 
 def _graph(n_obj=20, n_agents=30, n_places=10):
@@ -90,7 +86,7 @@ def test_decoding_a_binary_graph_reports_all_nodes_and_streams_c2():
 
 def test_decoding_the_real_hydra_graph():
     if not os.path.exists(REAL_DSG):
-        pytest.skip(f"no real DSG at {REAL_DSG}")
+        pytest.skip(f"set FLEETLINK_REAL_DSG to a Hydra DSG json (now {REAL_DSG!r})")
     try:
         G = dsg.DynamicSceneGraph.load(REAL_DSG)
     except Exception as exc:  # noqa: BLE001  (spark_dsg older than the file)

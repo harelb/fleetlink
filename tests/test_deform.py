@@ -268,16 +268,18 @@ def test_odom_tiles_and_base_view_reproduce_the_deformation():
 
 
 PGMO_HARNESS = os.environ.get("PGMO_DEFORM_HARNESS", "")
-LC_RUN = os.path.expanduser("~/adt4_output/imgstore_lc_on_20261017/hydra/backend")
+# a Hydra backend output directory (mesh.ply + deformation_graph.dgrf) of a run with
+# loop closures
+LC_RUN = os.path.expanduser(os.environ.get("FLEETLINK_LC_RUN", ""))
 
 
 @pytest.mark.skipif(
-    not (PGMO_HARNESS and os.path.exists(LC_RUN)),
-    reason="set PGMO_DEFORM_HARNESS (C++ ground truth)",
+    not (PGMO_HARNESS and LC_RUN and os.path.exists(LC_RUN)),
+    reason="set PGMO_DEFORM_HARNESS (C++ ground truth) and FLEETLINK_LC_RUN",
 )
 def test_matches_kimera_pgmo_on_a_real_loop_closure_run(tmp_path):
     """C++ ground truth: Kimera-PGMO's deformPoints on a real Hydra run with 77
-    loop closures (see docs/MESH_DEFORMATION_DESIGN.md for the harness)."""
+    loop closures (see docs/mesh_deformation.md for the harness)."""
     g = deform.parse_dgrf(os.path.join(LC_RUN, "deformation_graph.dgrf"))["s"]
     with open(os.path.join(LC_RUN, "mesh.ply")) as f:
         n = 0

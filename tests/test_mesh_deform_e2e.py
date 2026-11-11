@@ -20,7 +20,9 @@ from fleetlink.mesh_deform_link import tile_vids
 from fleetlink.receiver import Receiver
 from fleetlink.transport import LinkEmulator, VirtualClock
 
-RUN = os.path.expanduser("~/adt4_output/imgstore_lc_on_20261017/hydra/backend")
+# a Hydra backend output directory (mesh.ply + deformation_graph.dgrf) of a run with
+# loop closures; skipped without FLEETLINK_LC_RUN
+RUN = os.path.expanduser(os.environ.get("FLEETLINK_LC_RUN", ""))
 ROBOT = "lc"
 DT = 0.05
 STAGES = 10
@@ -30,8 +32,10 @@ LINK = dict(
 
 
 def _load():
+    if not RUN:
+        pytest.skip("set FLEETLINK_LC_RUN to a Hydra backend output directory")
     if not os.path.exists(os.path.join(RUN, "mesh.ply")):
-        pytest.skip(f"missing {RUN}")
+        pytest.skip(f"FLEETLINK_LC_RUN: no mesh.ply in {RUN}")
     g = deform.parse_dgrf(os.path.join(RUN, "deformation_graph.dgrf"))["s"]
     with open(os.path.join(RUN, "mesh.ply")) as f:
         nv = nf = 0
