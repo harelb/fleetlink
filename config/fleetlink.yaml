@@ -1,0 +1,40 @@
+---
+# fleetlink defaults (API.md §8). Budgets are BYTES per second.
+budgets:
+  C1: 5000  # state (~340 B at 4 Hz ≈ 1.4 kB/s)
+  C2: 50000  # graph deltas, 1 Hz tick
+  C3: 100000  # mesh tiles + occupancy grid
+  C4: 200000  # on-demand camera frames (request/reply)
+  C5: 400000  # live camera video, all streams together (API.md §12)
+  C6: 150000  # live image-store mirror, lowest priority (API.md §13)
+budget_min:  # auto (AIMD) mode never goes below / above these
+  C2: 5000
+  C3: 5000
+budget_max:
+  C2: 500000
+  C3: 1000000
+total_bps:  # optional overall cap shared in strict priority (null = none)
+auto: false
+state_hz: 4.0  # C1 rate; 2 Hz is not enough for < 1 s staleness at 3 % loss
+c2_hz: 1.0
+mesh_period_s: 5.0
+manifest_period_s: 5.0
+tile_size: 8.0
+max_msg_bytes: 65536
+burst_s: 1.0
+grid_period_s: 5.0  # occupancy grid: checked this often, sent only when it changed
+paths_hz: 2.0  # executor paths: checked this often, sent only when they changed
+video_keepalive_s: 6.0  # a video stream stops without a `video` request this long
+ffmpeg:  # null = $FLEETLINK_FFMPEG / ffmpeg on PATH / /usr/bin/ffmpeg
+c2_ring: 256  # last C2 messages kept for `resend` gap repair (0 = always resync)
+# lazy cameras: these are always subscribed, the others only while a C4 query or
+# C5 video request wanted them within camera_idle_s
+eager_cameras: [rgb, overlay]
+camera_idle_s: 15.0
+# C6 live image-store mirror (the ROS param store_path defaults to
+# $ADT4_OUTPUT_DIR/image_store; "" disables)
+store_send: false  # off by default; the console's Live panel turns it on per robot
+store_frames: keyframes  # keyframes | all
+store_compression: fast  # none | lossless | fast (fleetlink.image_transfer)
+store_poll_s: 1.0  # how often the store is checked for new frames
+store_queue_s: 2.0  # C6 frames queued at most, in seconds of C6 budget

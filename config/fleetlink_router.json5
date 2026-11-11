@@ -1,0 +1,37 @@
+/// fleetlink router: the base station's dedicated zenoh router for the radio
+/// (topology.yaml fleet_defaults.fleet_link: fleetlink). Started by
+/// fleetlink/bin/fleetlink-router (rmw_zenohd with ZENOH_ROUTER_CONFIG_URI=this file).
+///
+/// Robot fleetlink agents connect to it as zenoh *clients* over the radio, one transport
+/// per robot; the base fleetlink-bridge and console receiver connect over loopback.
+/// It connects to nothing: it must never link up with the base's ROS router (7447) or a
+/// robot's, which is what keeps every ROS graph on its own machine.
+///
+/// Deliberately minimal: every key not set here takes the zenoh 1.8 default. The port
+/// is zenoh.fleetlink_port in topology.yaml; `fleetlink-router PORT` overrides it.
+{
+  mode: "router",
+  connect: { endpoints: [] },
+  listen: { endpoints: ["tcp/[::]:7450"] },
+  scouting: {
+    multicast: { enabled: false },
+    gossip: { enabled: false },
+  },
+  adminspace: { enabled: false },
+  plugins: {},
+  /// The router fragments every message it forwards: to the base consumers (bridge,
+  /// console receiver) and, base -> robot, over the radio, where the agent's 8 kB
+  /// batch_size wins the negotiation. With zenoh's default 2 batches per priority, a
+  /// DROP message over ~16 kB (C2 snapshot chunks, C3 tiles and grids, C4 JPEG replies,
+  /// C5 key frames) is dropped whole whenever that queue is busy. 16 (zenoh's maximum)
+  /// on the data priorities, the same as the agent (fleetlink/transport.py ZENOH_DEFAULTS).
+  transport: {
+    link: {
+      tx: {
+        queue: {
+          size: { data_high: 16, data: 16, data_low: 16 },
+        },
+      },
+    },
+  },
+}

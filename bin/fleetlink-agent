@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+"""fleetlink-agent launcher: runs the robot-side agent from source in spark_env.
+
+spark_env carries eclipse-zenoh (pinned to rmw_zenoh's zenoh-c version), which
+the system ROS python does not; ROS args pass straight through, e.g.
+``fleetlink-agent --ros-args -r __ns:=/euclid -p use_sim_time:=true``.
+"""
+
+import os
+import pathlib
+import sys
+
+if not os.environ.get("_FLEETLINK_REEXEC"):
+    _adt4_env = os.environ.get("ADT4_ENV", "")
+    if _adt4_env:
+        _spark_env = pathlib.Path(_adt4_env) / "spark_env"
+        _spark_python = _spark_env / "bin" / "python3"
+        if _spark_python.exists() and sys.prefix != str(_spark_env):
+            os.environ["_FLEETLINK_REEXEC"] = "1"
+            os.execv(str(_spark_python), [str(_spark_python)] + sys.argv)
+
+_pkg = pathlib.Path(__file__).resolve().parent.parent
+if str(_pkg) not in sys.path:
+    sys.path.insert(0, str(_pkg))
+
+from fleetlink.agent import main  # noqa: E402
+
+main()

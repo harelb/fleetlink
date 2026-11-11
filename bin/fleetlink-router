@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# fleetlink-router [PORT]: the base station's dedicated zenoh router for fleetlink.
+#
+# Runs rmw_zenohd with fleetlink/config/fleetlink_router.json5 (listen tcp/[::]:7450,
+# connect to nothing, no scouting/gossip/adminspace/plugins). PORT overrides the listen
+# port (default: the json5's 7450 = topology.yaml zenoh.fleetlink_port). 7447 is refused:
+# that is the ROS router's port, and the two networks must stay separate.
+#
+# Env: FLEETLINK_ROUTER_CONFIG overrides the json5 path; an existing ZENOH_CONFIG_OVERRIDE
+# is kept (the port override is appended to it).
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+config="${FLEETLINK_ROUTER_CONFIG:-$here/../config/fleetlink_router.json5}"
+if [[ ! -f "$config" ]]; then
+  echo "fleetlink-router: config not found: $config" >&2
+  exit 1
+fi
+export ZENOH_ROUTER_CONFIG_URI="$(cd "$(dirname "$config")" && pwd)/$(basename "$config")"
+
+if [[ $# -gt 0 && -n "$1" ]]; then
+  port="$1"
+  if ! [[ "$port" =~ ^[0-9]+$ ]] || (( port < 1 || port > 65535 )); then
+    echo "fleetlink-router: bad port '$port'" >&2
+    exit 2
+  fi
+  if (( port == 7447 )); then
+    echo "fleetlink-router: refusing port 7447 (the ROS rmw_zenohd router's port)" >&2
+    exit 2
+  fi
+  override="listen/endpoints=[\"tcp/[::]:$port\"]"
+  export ZENOH_CONFIG_OVERRIDE="${ZENOH_CONFIG_OVERRIDE:+$ZENOH_CONFIG_OVERRIDE;}$override"
+fi
+
+if ! command -v ros2 >/dev/null 2>&1; then
+  set +u
+  # shellcheck disable=SC1091
+  source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
+  set -u
+fi
+
+echo "fleetlink-router: $ZENOH_ROUTER_CONFIG_URI${ZENOH_CONFIG_OVERRIDE:+ (override: $ZENOH_CONFIG_OVERRIDE)}"
+exec ros2 run rmw_zenoh_cpp rmw_zenohd
