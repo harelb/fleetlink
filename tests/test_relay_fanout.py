@@ -87,6 +87,7 @@ def test_uplink_is_published_on_base_and_reaches_every_robot_once(monkeypatch):
     bridge.transport = link.base
     bridge._lock = threading.Lock()
     bridge._cores, bridge._pubs = {}, {}
+    bridge._sub_group = None
     bridge._on_event = lambda *_: None
     bridge.log = NS(info=lambda *_: None, warn=lambda *_: None)
     bridge._publish = lambda pub, data: (
