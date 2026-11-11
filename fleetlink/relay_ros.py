@@ -686,6 +686,20 @@ class BaseBridge(_RelayEnd):
             msg = self._String(data=text)
             self._marshal(lambda m=msg: self.status_pub.publish(m))
 
+    def node_status(self, now: float | None = None) -> tuple[str, str]:
+        """``(level, notes)`` for ``ros_system_monitor`` (``node_status.py``)."""
+        from fleetlink.node_status import bridge_status
+
+        now = time.time() if now is None else now
+        with self._lock:
+            cores = dict(self._cores)
+        opened = getattr(self.transport, "opened", None)
+        return bridge_status(
+            {r: c.status(now) for r, c in cores.items()},
+            opened=True if opened is None else opened.is_set(),
+            open_error=getattr(self.transport, "open_error", None),
+        )
+
     def shutdown(self) -> None:
         if self._discovery is not None:
             unsub = getattr(self.transport, "unsubscribe", None)
@@ -716,9 +730,28 @@ def main(args=None) -> None:
     from fleetlink.agent import zenoh_version_warning
     from fleetlink.transport import ZenohTransport, split_endpoints
 
+    from fleetlink.node_status import StatusReporter, bridge_status
+
     rclpy.init(args=args)
     node = Node("fleetlink_bridge")
     p = lambda name, default: node.declare_parameter(name, default).value  # noqa: E731
+    status_nickname = p("status_nickname", "fleetlink_bridge")
+    status_period_s = p("status_period_s", 1.0)
+    if p("idle", False):
+        # launch files that start the bridge in every mode (router mode: rmw_zenoh
+        # carries the robots' topics): report NOMINAL / idle, relay nothing
+        idle = lambda: bridge_status({}, idle=True)  # noqa: E731
+        StatusReporter(node, idle, status_nickname, status_period_s)
+        node.get_logger().info("fleetlink-bridge idle (idle:=true): status only")
+        try:
+            rclpy.spin(node)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            node.destroy_node()
+            if rclpy.ok():
+                rclpy.shutdown()
+        return
     connect = split_endpoints(p("zenoh_connect", "tcp/127.0.0.1:7450"))
     topo_path = require_file(
         find_topology(p("topology", "")), "topology", TOPOLOGY_HINT
@@ -740,6 +773,7 @@ def main(args=None) -> None:
     if not transport.opened.is_set():
         log.warn(f"no zenoh router at {connect} yet ({transport.open_error}); retrying")
     bridge = BaseBridge(node, transport, config, robots, base=base)
+    StatusReporter(node, bridge.node_status, status_nickname, status_period_s)
     executor = make_executor()
     executor.add_node(node)
     try:

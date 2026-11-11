@@ -46,6 +46,7 @@ import numpy as np
 from fleetlink import codec, media, video
 from fleetlink.codec import GraphDelta, GraphState
 from fleetlink.scheduler import Item, Scheduler
+from fleetlink.node_status import RTT_WARN_S, StatusReporter, agent_status
 from fleetlink.transport import Transport, split_endpoints
 
 # rmw_zenoh 0.2.11 links zenoh-c 1.8; eclipse-zenoh must speak the same protocol
@@ -282,6 +283,9 @@ class AgentCore:
         self._inbox_lock = threading.Lock()
         self._acked: dict = {}  # request id -> ack payload (idempotent retries)
         self._fb_seen = False  # a base that sends ``fb`` (ping rx is then ignored)
+        # last request from a base console and the RTT it reported (status notes)
+        self.ctl_t: float | None = None
+        self.ctl_rtt: float | None = None
         # C2 ring buffer: seq -> packed message, for ``resend``
         self._c2_ring: dict[int, bytes] = {}
         self.c2_resent = 0
@@ -675,6 +679,9 @@ class AgentCore:
         rid = req.get("id")
         op = req.get("op")
         args = req.get("args") or {}
+        self.ctl_t = now
+        if op in ("ping", "fb") and args.get("rtt") is not None:
+            self.ctl_rtt = args["rtt"]
         if op == "fb":  # fire-and-forget feedback: no ack
             try:
                 self._execute(op, args, now)
@@ -1224,6 +1231,29 @@ class AgentCore:
             "dsg": {k: v for k, v in dict(self.dsg_diag).items() if k[0] != "_"},
         }
 
+    def node_status(
+        self, relay: dict | None = None, now: float | None = None, **kw
+    ) -> tuple[str, str]:
+        """``(level, notes)`` for ``ros_system_monitor`` (see ``node_status.py``);
+        ``relay`` is the ROS relay's ``RelayCore.status()`` in fleetlink mode."""
+        now = self.clock() if now is None else now
+        tr = self.transport
+        opened = getattr(tr, "opened", None)
+        queued = sum(q["bytes"] for q in self.sched.queue_stats().values())
+        return agent_status(
+            opened=True if opened is None else opened.is_set(),
+            open_error=getattr(tr, "open_error", None),
+            endpoints=getattr(tr, "endpoints", None),
+            relay=relay,
+            console_age_s=None if self.ctl_t is None else now - self.ctl_t,
+            console_rtt_s=self.ctl_rtt,
+            mesh_source="odometric" if self.odom is not None else "dsg",
+            mesh_fallback=self.mesh_fallback,
+            queued_bytes=queued,
+            store_error=self.store_error,
+            **kw,
+        )
+
     # ------------------------------------------------------------------- C6
 
     def _store_state(self):
@@ -1707,6 +1737,10 @@ class AgentNode:
         roman_lc_topic = p("roman_lc_topic", "roman/roman_lc/loop_closure")
         roman_live_id = p("roman_live_robot_id", 0)
         self.health_monitor = p("health_monitor_name", robot)
+        # ros_system_monitor heartbeat on ~/node_status (0 = off)
+        status_nickname = p("status_nickname", "fleetlink_agent")
+        status_period_s = p("status_period_s", 1.0)
+        self.status_rtt_warn_s = p("status_rtt_warn_s", RTT_WARN_S)
         for cls in ("C1", "C2", "C3"):
             cfg["budgets"][cls] = p(f"budget_{cls}", int(cfg["budgets"][cls]))
         cfg["auto"] = p("auto", bool(cfg["auto"]))
@@ -1922,6 +1956,10 @@ class AgentNode:
         relay_config = p("relay_config", "")
         if relay_config:
             self.relay = self._start_relay(robot, relay_config, self.platform, topology)
+
+        self.status = StatusReporter(
+            nd, self._node_status, status_nickname, status_period_s
+        )
 
         self._decoder = threading.Thread(target=self._decode_loop, daemon=True)
         self._decoder.start()
@@ -2311,6 +2349,10 @@ class AgentNode:
             msg.data,
             stamp_s(msg.header),
         )
+
+    def _node_status(self) -> tuple[str, str]:
+        relay = None if self.relay is None else self.relay.core.status()
+        return self.core.node_status(relay, rtt_warn_s=self.status_rtt_warn_s)
 
     def _on_health(self, msg) -> None:
         if self.health_monitor and msg.monitor_name != self.health_monitor:

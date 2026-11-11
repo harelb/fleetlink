@@ -371,7 +371,8 @@ endpoint or a comma-separated list, retried forever, so the agent starts fine be
 `tick_hz` (20), `budget_C1`…`budget_C6`, `store_path` (`$ADT4_OUTPUT_DIR/image_store`, `""` off),
 `store_frames`, `store_compression`, `eager_cameras`, `camera_idle_s`, `ffmpeg`, `auto`, `mesh_period_s`, `tile_size`, `grid_period_s`,
 `dsg_topic` (`hydra/backend/dsg`), `guards_topic`, `result_topic`, `health_topic`,
-`health_monitor_name`, `map_frame` (default: the DSG header frame), `body_frame` (`<robot>/body`),
+`health_monitor_name`, `status_nickname` / `status_period_s` / `status_rtt_warn_s` (see
+[Status monitor](#status-monitor-node_status)), `map_frame` (default: the DSG header frame), `body_frame` (`<robot>/body`),
 `fallback_map_frame` (`<robot>/map`), `grid_topic` (`hydra/tsdf/occupancy`),
 `smooth_path_topic` / `mlp_path_topic` / `mlp_target_topic` (`spot_executor_node/…_publisher`),
 and `cameras` (list of `name=topic`, default
@@ -382,6 +383,28 @@ of rmw_zenoh 0.2.x). It also logs which `spark_dsg` it imported and reports DSG 
 `state.stats.dsg` (received / processed / failed, node counts, and a `warning` when a payload
 that has nodes decodes to none, e.g. a stale spark_dsg shadowing the workspace build). Budgets
 can also be changed live by the base (C0 `budget`).
+
+## Status monitor (`~/node_status`)
+
+The agent and the bridge report their health once per `status_period_s` (1.0; 0 = off) as a
+`ros_system_monitor_msgs/NodeInfoMsg` on `~/node_status`, with the nicknames
+`fleetlink_agent` and `fleetlink_bridge` (`status_nickname` overrides). Remap `~/node_status`
+to your monitor's collector (in ADT4: `/<robot>/ros_system_monitor/node_diagnostic_collector`)
+and track the nickname there. `ros_system_monitor_msgs` is optional: without it the node logs
+one line and publishes nothing. The status is computed from what the link already tracks (the
+relay heartbeat's liveness and RTT, the console's `ping` / `fb` requests, the zenoh session,
+the mesh mode); nothing is added to the wire. The notes are one line, e.g.
+`fleetlink | base up rtt 84ms | tcp/192.0.2.10:7450 (+1 failover) | mesh odometric`.
+
+| node | NOMINAL | WARNING | ERROR |
+|---|---|---|---|
+| agent, fleetlink mode (`relay_config` set) | relay heartbeat from the base within 3 s, RTT under `status_rtt_warn_s` (1.5 s) | no base heartbeat yet, base link down (heartbeat older than 3 s), RTT high, `relay.yaml` differs from the base's, odometric mesh fell back to `dsg` | zenoh session not open |
+| agent, router mode (no relay) | session open; the console's last request and RTT are a note only (nothing says a console should be there) | odometric mesh fell back to `dsg` | zenoh session not open |
+| bridge | every robot it has heard from is still sending heartbeats (robots never heard from are listed as `waiting`) | a robot that was connected went silent, or its `relay.yaml` differs | zenoh session not open |
+| bridge, `idle:=true` | always (`Idle: router mode, ...`): for launch files that start the bridge in every mode, so the monitor never sees it go missing | | |
+
+The notes also carry the configured endpoint(s), the mesh source, the scheduler's queued bytes
+when non-zero, and the reason when the image-store mirror is disabled (a note, not a warning).
 
 ## Generic ROS relay (fleetlink mode)
 
@@ -459,7 +482,9 @@ message types that are not installed on a machine are skipped with a warning.
   after a down message is acked. The JSON is `RelayCore.status()`: `connected`, `rtt`, `loss`,
   `last_seen`, `clock_offset`, `epoch`, `peer_epoch`, `cfg_match`, and per topic `sent`,
   `acked`, `pending` and `subs`, the subscribers on the far side when the message was applied.
-  A base UI can take delivery acks and robot liveness from this topic. ROS subscriber
+  A base UI can take delivery acks and robot liveness from this topic, and `~/node_status`
+  summarizes it for a status monitor ([Status monitor](#status-monitor-node_status); `-p
+  idle:=true` runs status only, needing no topology or relay table). ROS subscriber
   counts mean nothing once the bridge subscribes everything. Both ends spin multi-threaded
   (`relay_ros.make_executor()`, 8 threads): proxy servers block in a reentrant group while
   the far side answers. At most 2 relayed calls per end wait at once (`MAX_PROXY_CALLS`);
