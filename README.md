@@ -459,6 +459,15 @@ message types that are not installed on a machine are skipped with a warning.
   `cfg_match: false`. Everything is congestion-control DROP. Relay messages do not go through
   the agent's scheduler; `rate_hz` is their only budget.
 
+  **Priority.** `priority: high` (topics, acked modes) is for a message someone is waiting
+  on, e.g. a Spot manipulation approval request (candidate JPEGs + a 16-bit depth PNG, a few
+  hundred kB, newest wins). Its class must be C0-C2 (default C2, zenoh `DATA_HIGH`: ahead of
+  C4 queries, C3 mesh, C5 video and C6 store in zenoh's queues). While one is pending (unacked,
+  at most `priority_hold_s` = 10 s from its first send) `RelayCore.urgent()` is True and the
+  agent's scheduler holds its bulk classes C2-C6 (`Scheduler.hold`), so the message is not
+  slowed by the graph, mesh or image-store backlog; C0 and C1 are never held. Both ends must
+  run a fleetlink that knows the key (an older one rejects the table).
+
   **Large messages are relayed in parts.** In the acked modes a message over `chunk_bytes`
   (16 kB) goes as parts `{..., id, part, parts, data}`, at most `chunk_window` (6)
   unacknowledged at a time, so a few hundred kB never overflows zenoh's 128 kB per-priority

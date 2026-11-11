@@ -31,6 +31,12 @@
 #                  never re-runs a stale plan.
 #   qos            QoS of the republished ROS endpoint on the receiving side
 #                  (reliability: reliable|best_effort, durability: volatile|transient_local, depth)
+#   priority       normal (default) | high. high: someone is waiting on this message (e.g. a
+#                  manipulation approval request with its images). Acked modes only; cls
+#                  C0-C2 (default C2, zenoh DATA_HIGH: ahead of C4/C3/C5/C6). While one is
+#                  pending (up to 10 s from its first send) the robot agent holds its
+#                  scheduler's bulk classes C2-C6; C0/C1 are never held. Both ends must run
+#                  a fleetlink that knows the key.
 #   platform       optional list; only relay for these robot platforms (topology
 #                  platform_type: spot, phoenix; "husky" kept as an alias). A robot without
 #                  platform_type counts as spot (fleetlink.relay_ros.platform_of).

@@ -1962,6 +1962,8 @@ class AgentNode:
         relay_config = p("relay_config", "")
         if relay_config:
             self.relay = self._start_relay(robot, relay_config, self.platform, topology)
+            # a pending ``priority: high`` relayed message holds the bulk classes
+            self.core.sched.hold = self.relay.core.urgent
 
         self.status = StatusReporter(
             nd, self._node_status, status_nickname, status_period_s
