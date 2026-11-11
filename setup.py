@@ -41,7 +41,7 @@ setup(
         "console_scripts": [
             "fleetlink-agent = fleetlink.launcher:agent",
             "fleetlink-bridge = fleetlink.launcher:bridge",
-            "fleetlink-image-pack = fleetlink.image_pack:main",
+            "fleetlink-image-pack = fleetlink.launcher:image_pack",
         ]
     },
 )

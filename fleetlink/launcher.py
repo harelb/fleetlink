@@ -1,4 +1,4 @@
-"""Console-script entry points for ``fleetlink-agent`` and ``fleetlink-bridge``.
+"""Console-script entry points: ``fleetlink-agent``, ``fleetlink-bridge``, ``fleetlink-image-pack``.
 
 Both need ``eclipse-zenoh`` pinned to the zenoh version of ``rmw_zenoh`` (1.8),
 which often lives in a separate virtualenv rather than the system Python that
@@ -114,3 +114,12 @@ def bridge() -> None:
     from fleetlink.relay_ros import main
 
     main()
+
+
+def image_pack() -> None:
+    # no ROS: argparse handles --help, after the re-exec (the store reader may live
+    # only in that environment)
+    _maybe_reexec("image_pack")
+    from fleetlink.image_pack import main
+
+    sys.exit(main())
