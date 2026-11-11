@@ -50,7 +50,13 @@ from fleetlink.receiver import Receiver
 from fleetlink.scheduler import Item
 from fleetlink.transport import LinkEmulator, SharedChannel, VirtualClock
 
-MAP = "~/data/pennovation_2025/courtyard-alleyways/output/hydra/backend/dsg_with_mesh.json"
+# a Hydra backend DSG with mesh (Pennovation courtyard-alleyways run); override with FLEETLINK_PENN_MAP
+MAP = os.environ.get(
+    "FLEETLINK_PENN_MAP",
+    os.path.expanduser(
+        "~/data/pennovation_2025/courtyard-alleyways/output/hydra/backend/dsg_with_mesh.json"
+    ),
+)
 DT = 1.0 / 30.0  # 15 / 10 / 5 fps video lands on whole ticks
 TILE = 8.0
 VIDEO_PRESETS = ("low", "med", "high", "tab")
@@ -60,8 +66,9 @@ VIDEO_PRESETS = ("low", "med", "high", "tab")
 def load_penn(path: str = MAP) -> dict:
     """The map, each node / mesh face tagged with the trajectory index at which
     the robot has passed it (same reveal as the Pennovation integration test)."""
-    import spark_dsg as dsg
     from scipy.spatial import cKDTree
+
+    import spark_dsg as dsg
 
     G = dsg.DynamicSceneGraph.load(path)
     records, edges, ls, mesh = graph_inputs(G)
@@ -71,7 +78,11 @@ def load_penn(path: str = MAP) -> dict:
             a = n.attributes
             if hasattr(a, "world_R_body"):
                 ts = a.timestamp
-                ts = ts.total_seconds() if hasattr(ts, "total_seconds") else float(ts) * 1e-9
+                ts = (
+                    ts.total_seconds()
+                    if hasattr(ts, "total_seconds")
+                    else float(ts) * 1e-9
+                )
                 traj.append((ts, str(n.id), np.asarray(a.position, float)))
     traj.sort(key=lambda x: x[0])
     tpos = np.stack([p for _, _, p in traj])
@@ -169,7 +180,9 @@ class VideoSource:
     def tick(self, now: float) -> None:
         if now < self.next_t - 1e-6:
             return
-        self.next_t = max(self.next_t + 1.0 / self.fps, now)  # no drift from tick rounding
+        self.next_t = max(
+            self.next_t + 1.0 / self.fps, now
+        )  # no drift from tick rounding
         f = self.frames[self.i % len(self.frames)]
         if self.key_at is not None and now >= self.key_at and not f["key"]:
             f = {"n": self.key_size, "key": True}  # an extra key frame (bigger)
@@ -184,8 +197,13 @@ class VideoSource:
         if any(it.tag == f"video/{self.cam}" for it in q):
             self.skipped += 1
         self.agent.sched.enqueue(
-            Item("C5", f"{self.agent.prefix}/benchvideo/{self.cam}", lambda b=body: b, len(body),
-                 tag=f"video/{self.cam}"),  # fmt: skip
+            Item(
+                "C5",
+                f"{self.agent.prefix}/benchvideo/{self.cam}",
+                lambda b=body: b,
+                len(body),
+                tag=f"video/{self.cam}",
+            ),  # fmt: skip
         )
 
 
@@ -237,16 +255,22 @@ class StoreSource:
 
     def tick(self, now: float) -> None:
         while now >= self.next_t:
-            self.backlog.append((self.made, self.next_t, self.sizes[self.made % len(self.sizes)]))
+            self.backlog.append(
+                (self.made, self.next_t, self.sizes[self.made % len(self.sizes)])
+            )
             self.next_t += 1.0 / self.kf_hz
             self.made += 1
         sched = self.agent.sched
         budget = sched.budget("C6") or 0
         limit = budget * self.agent.cfg["store_queue_s"]
-        while self.backlog and sched.queued_bytes("C6") + self.backlog[0][2] <= max(limit, self.backlog[0][2]):
+        while self.backlog and sched.queued_bytes("C6") + self.backlog[0][2] <= max(
+            limit, self.backlog[0][2]
+        ):
             fid, t0, n = self.backlog.pop(0)
             body = struct.pack("<Id", fid, t0) + bytes(max(0, n - 12))
-            sched.enqueue(Item("C6", f"{self.agent.prefix}/benchstore/frame", lambda b=body: b, n))
+            sched.enqueue(
+                Item("C6", f"{self.agent.prefix}/benchstore/frame", lambda b=body: b, n)
+            )
 
 
 class StoreSink:
@@ -292,11 +316,17 @@ def run(stages: Stages, traces: dict, robots: int, rate_mbps: float, video: int,
                 vsrc[n].key_at = now + 2 * latency
 
             vsink[name] = VideoSink(tr["fps"], ask_key)
-            lk.base.subscribe(f"adt4/{name}/benchvideo/**", lambda k, d, n=name: vsink[n].on(clock(), d))
+            lk.base.subscribe(
+                f"adt4/{name}/benchvideo/**",
+                lambda k, d, n=name: vsink[n].on(clock(), d),
+            )
         if mirror:
             ssrc[name] = StoreSource(ag, traces["store"], kf_hz)
             ssink[name] = StoreSink()
-            lk.base.subscribe(f"adt4/{name}/benchstore/**", lambda k, d, n=name: ssink[n].on(clock(), d))
+            lk.base.subscribe(
+                f"adt4/{name}/benchstore/**",
+                lambda k, d, n=name: ssink[n].on(clock(), d),
+            )
 
     state_age = {n: [] for n in names}
     rtts = {n: [] for n in names}
@@ -375,12 +405,22 @@ def run(stages: Stages, traces: dict, robots: int, rate_mbps: float, video: int,
                     else:
                         c2_catch[n].append(dt_c)
                     graph_dirty_since[n] = None
-                if stage == stages.n and not lc_done and mesh_reveal[n] is None and mesh_ok(i):
+                if (
+                    stage == stages.n
+                    and not lc_done
+                    and mesh_reveal[n] is None
+                    and mesh_ok(i)
+                ):
                     mesh_reveal[n] = t - (stages.n - 1) * stage_period
                 if lc_done and mesh_lc[n] is None and mesh_ok(i):
                     mesh_lc[n] = t - lc_s
-            if lc_done and all(mesh_lc[n] is not None and c2_lc[n] is not None for n in names) \
-                    and t > lc_s + 30.0 and not vsrc and not ssrc:
+            if (
+                lc_done
+                and all(mesh_lc[n] is not None and c2_lc[n] is not None for n in names)
+                and t > lc_s + 30.0
+                and not vsrc
+                and not ssrc
+            ):
                 break
 
     T = clock()
@@ -399,7 +439,9 @@ def run(stages: Stages, traces: dict, robots: int, rate_mbps: float, video: int,
             "loss_drops": dict(st.loss_drops),
             "retransmits": dict(st.retransmits),
             "down_air_B": sum(down.wire_bytes.values()),
-            "kbps_up": {c: round(8 * v / T / 1000, 1) for c, v in st.wire_bytes.items() if v},
+            "kbps_up": {
+                c: round(8 * v / T / 1000, 1) for c, v in st.wire_bytes.items() if v
+            },
             "state_age_p50": pct(state_age[n], 50),
             "state_age_p99": pct(state_age[n], 99),
             "state_age_max": max(state_age[n]) if state_age[n] else None,
@@ -411,7 +453,9 @@ def run(stages: Stages, traces: dict, robots: int, rate_mbps: float, video: int,
             "c2_after_lc": c2_lc[n],
             "mesh_after_reveal": mesh_reveal[n],
             "mesh_after_lc": mesh_lc[n],
-            "video": None if vs is None else {
+            "video": None
+            if vs is None
+            else {
                 "frames_shown": len(vs.shown),
                 "fps": round(len(vs.shown) / T, 2),
                 "freezes": vs.freezes,
@@ -419,7 +463,9 @@ def run(stages: Stages, traces: dict, robots: int, rate_mbps: float, video: int,
                 "skipped_at_robot": vsrc[n].skipped,
                 "forced_keys": vsrc[n].forced_keys,
             },
-            "mirror": None if ss is None else {
+            "mirror": None
+            if ss is None
+            else {
                 "made": ssrc[n].made,
                 "delivered": ss.got,
                 "backlog": ssrc[n].made - ss.got,
@@ -486,8 +532,15 @@ def main(argv=None):
     ap.add_argument("--reveal-s", type=float, default=300.0)
     ap.add_argument("--lc-s", type=float, default=330.0)
     ap.add_argument("--end-s", type=float, default=900.0)
-    ap.add_argument("--hops-last", type=float, default=1.0, help="air factor of the last robot (relay hops)")
-    ap.add_argument("--tcp-hol", action="store_true", help="one FIFO per link (TCP head-of-line)")
+    ap.add_argument(
+        "--hops-last",
+        type=float,
+        default=1.0,
+        help="air factor of the last robot (relay hops)",
+    )
+    ap.add_argument(
+        "--tcp-hol", action="store_true", help="one FIFO per link (TCP head-of-line)"
+    )
     a = ap.parse_args(argv)
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tests"))
     traces = json.load(open(a.traces))

@@ -173,7 +173,9 @@ def decode_compressed(buf: np.ndarray) -> np.ndarray:
         if img is None:
             raise ValueError("undecodable compressed image")
         if img.ndim == 3:
-            img = _cv2.cvtColor(img, _cv2.COLOR_BGRA2RGB if img.shape[2] == 4 else _cv2.COLOR_BGR2RGB)
+            img = _cv2.cvtColor(
+                img, _cv2.COLOR_BGRA2RGB if img.shape[2] == 4 else _cv2.COLOR_BGR2RGB
+            )
         return np.ascontiguousarray(img)
     import io
 
@@ -233,7 +235,9 @@ def camera_reply(
     img = image_to_array(
         frame["encoding"], frame["width"], frame["height"], frame["step"], frame["data"]
     )
-    src_h, src_w = img.shape[:2]  # compressed frames don't know their size until decoded
+    src_h, src_w = img.shape[
+        :2
+    ]  # compressed frames don't know their size until decoded
     img = resize_max_width(img, max_w)
     data, fmt = encode_image(img, quality, force_png)
     return {

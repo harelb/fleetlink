@@ -3,13 +3,12 @@ on request (robot-wide or per tile), and old bases / robots keep full tiles."""
 
 import numpy as np
 from helpers import RecordingTransport, env_bytes, synthetic_mesh, synthetic_records
+from test_agent import _acks, _req, _run
 
 from fleetlink import codec
 from fleetlink.agent import AgentCore
 from fleetlink.receiver import Receiver
 from fleetlink.transport import VirtualClock
-
-from test_agent import _acks, _req, _run
 
 
 def _dense():
@@ -25,7 +24,11 @@ def test_decimate_reduces_and_keeps_a_clean_mesh():
     assert dp.dtype == np.float32 and dc.dtype == np.uint8 and df.dtype == np.uint32
     assert df.max() < len(dp)  # every index valid, no unused vertex left
     assert len(np.unique(df)) == len(dp)
-    assert (df[:, 0] != df[:, 1]).all() and (df[:, 1] != df[:, 2]).all() and (df[:, 0] != df[:, 2]).all()
+    assert (
+        (df[:, 0] != df[:, 1]).all()
+        and (df[:, 1] != df[:, 2]).all()
+        and (df[:, 0] != df[:, 2]).all()
+    )
     srt = np.sort(df, axis=1)
     assert len(np.unique(srt, axis=0)) == len(df)  # no duplicate triangles
     # the surface stays where it was: every new vertex is a mean of old ones in its cell
@@ -51,7 +54,9 @@ def test_decimate_edge_cases():
     assert codec.decimate_mesh(pos, col, faces[:0], 0.4)[2].shape == (0, 3)
     same = codec.decimate_mesh(pos, col, faces, 0)  # no cell: unchanged
     assert len(same[2]) == len(faces)
-    tiny = codec.decimate_mesh(pos[:3] * 0.001, col[:3], np.array([[0, 1, 2]], np.uint32), 0.4)
+    tiny = codec.decimate_mesh(
+        pos[:3] * 0.001, col[:3], np.array([[0, 1, 2]], np.uint32), 0.4
+    )
     assert tiny[2].shape == (0, 3)  # a triangle inside one cell collapses
 
 
@@ -61,7 +66,19 @@ def _agent():
     core = AgentCore("r", tr, {}, clock)
     recs, edges, ls = synthetic_records(10)
     core.on_records(recs, edges, ls, _dense())
-    core.on_pose({"x": 0, "y": 0, "z": 0, "qw": 1, "qx": 0, "qy": 0, "qz": 0, "frame": "map", "t": 0})
+    core.on_pose(
+        {
+            "x": 0,
+            "y": 0,
+            "z": 0,
+            "qw": 1,
+            "qx": 0,
+            "qy": 0,
+            "qz": 0,
+            "frame": "map",
+            "t": 0,
+        }
+    )
     return tr, clock, core
 
 
@@ -79,7 +96,9 @@ def test_full_tiles_until_a_base_asks():
     _run(clock, core, 30.0)
     assert core.mesh_lod is None and "lod" not in _manifest(tr)
     full = codec.tile_mesh(*_dense())
-    assert {k: t["hash"] for k, t in core.tiles.items()} == {k: t["hash"] for k, t in full.items()}
+    assert {k: t["hash"] for k, t in core.tiles.items()} == {
+        k: t["hash"] for k, t in full.items()
+    }
 
 
 def test_decimated_then_full_on_request():
@@ -150,10 +169,37 @@ def test_receiver_asks_new_robots_for_the_decimated_lod():
 def test_receiver_mesh_status_and_old_base_mode():
     tr, clock, rx = _rx()
     lod = {"level": "decimated", "tiles": {"a": "full"}, "cell": 0.4}
-    rx._on_msg("k", env_bytes("r", "mesh/manifest", 0, "E1", {"tiles": {"a": "h1", "b": "h2"}, "lod": lod}))
-    rx._on_msg("k", env_bytes("r", "mesh/tile", 0, "E1", {"key": "a", "hash": "h1", "pos": b"x" * 60, "col": b"c" * 30, "idx": b"i" * 120}))
+    rx._on_msg(
+        "k",
+        env_bytes(
+            "r", "mesh/manifest", 0, "E1", {"tiles": {"a": "h1", "b": "h2"}, "lod": lod}
+        ),
+    )
+    rx._on_msg(
+        "k",
+        env_bytes(
+            "r",
+            "mesh/tile",
+            0,
+            "E1",
+            {
+                "key": "a",
+                "hash": "h1",
+                "pos": b"x" * 60,
+                "col": b"c" * 30,
+                "idx": b"i" * 120,
+            },
+        ),
+    )
     m = rx.link("r")["mesh"]
-    assert m == {"lod": "decimated", "lod_tiles": {"a": "full"}, "wanted": "decimated", "tiles": 2, "pending": 1, "bytes": 210}
+    assert m == {
+        "lod": "decimated",
+        "lod_tiles": {"a": "full"},
+        "wanted": "decimated",
+        "tiles": 2,
+        "pending": 1,
+        "bytes": 210,
+    }
     # a base configured not to ask (mesh_lod=None) never sends the op
     tr2, clock2, rx2 = _rx(mesh_lod=None)
     rx2._on_msg("k", env_bytes("r", "mesh/manifest", 0, "E1", {"tiles": {}}))

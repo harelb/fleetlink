@@ -14,7 +14,9 @@ def room_scan(rows=128, cols=1024, seed=0):
     az = np.linspace(-np.pi, np.pi, cols, endpoint=False)
     el = np.radians(np.linspace(-22.5, 22.5, rows))
     A, E = np.meshgrid(az, el)
-    d = np.stack([np.cos(E) * np.cos(A), np.cos(E) * np.sin(A), np.sin(E)], -1).reshape(-1, 3)
+    d = np.stack([np.cos(E) * np.cos(A), np.cos(E) * np.sin(A), np.sin(E)], -1).reshape(
+        -1, 3
+    )
     t = np.full(len(d), np.inf)
     with np.errstate(divide="ignore", invalid="ignore"):
         for ax, lo, hi in ((0, -12, 25), (1, -6, 8), (2, -0.8, 2.6)):
@@ -42,7 +44,9 @@ def test_round_trip_within_a_centimetre_without_voxels():
 
 
 def test_xyz_int16_is_the_interleaved_contract_format():
-    xyz = np.array([[1.0, -2.0, 0.5], [29.0, 0.01, -0.99], [-0.31, 0.0, 3.99]], np.float32)
+    xyz = np.array(
+        [[1.0, -2.0, 0.5], [29.0, 0.01, -0.99], [-0.31, 0.0, 3.99]], np.float32
+    )
     w = pc.encode_cloud(xyz, voxel=0)
     raw = pc.xyz_int16(w)
     assert len(raw) == 6 * w["n"]
@@ -73,7 +77,7 @@ def test_voxel_downsample_one_centroid_per_voxel():
     xyz = rng.uniform(0, 3, (20000, 3)).astype(np.float32)
     v, _ = pc.voxel_downsample(xyz, voxel=0.15)
     keys = {tuple(k) for k in np.floor(xyz / 0.15).astype(int)}
-    assert len(v) == len(keys) <= 20 ** 3
+    assert len(v) == len(keys) <= 20**3
     # each centroid lies in its own voxel
     assert len({tuple(k) for k in np.floor(v / 0.15).astype(int)}) == len(v)
     w = pc.encode_cloud(xyz, voxel=0.15, min_range=0)
@@ -108,8 +112,12 @@ def test_cloud_arrays_parses_pointcloud2_layouts():
     a["intensity"] = 10 * np.arange(n)
     fields = [("x", 0, 7), ("y", 4, 7), ("z", 8, 7), ("intensity", 16, 7),
               ("t", 20, 6), ("ring", 24, 4)]  # fmt: skip
-    xyz, inten = pc.cloud_arrays(fields, 48, a.tobytes(), n // 2, 2, row_step=48 * n // 2)
-    assert xyz[:, 0].tolist() == list(range(n)) and xyz[:, 1].tolist() == [-v for v in range(n)]
+    xyz, inten = pc.cloud_arrays(
+        fields, 48, a.tobytes(), n // 2, 2, row_step=48 * n // 2
+    )
+    assert xyz[:, 0].tolist() == list(range(n)) and xyz[:, 1].tolist() == [
+        -v for v in range(n)
+    ]
     assert inten.tolist() == [10.0 * v for v in range(n)]
     # padded rows (row_step > width * point_step) and big-endian data
     rows = [np.concatenate([a[r * 3 : r * 3 + 3].astype(dt.newbyteorder(">")).view(np.uint8),

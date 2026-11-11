@@ -134,7 +134,7 @@ graph; the image-store mirror only uses what is left.
 
 `store_mirror.py`. The agent tails the robot's image store read-only (`store_path`, default
 `$ADT4_OUTPUT_DIR/image_store`, built from Hydra's keyframe zips / track logs / event logs by
-`hydra-image-store tail`) and, **only while sending is on**, sends each new settled frame
+Hydra's image-store tailer) and, **only while sending is on**, sends each new settled frame
 (`store_frames`: `keyframes` = the agent nodes' own keyframes, i.e. the KEYFRAMEs anchored with an
 identity `anchor_T_body` (+ kept object observation frames, with their observations and node
 binding) | `all` = every keyframe)
@@ -146,6 +146,11 @@ after an agent restart and after a gap, so nothing is lost or duplicated across 
 run or Hydra session (`indexer.tail.session`) starts a new mirror directory. Protocol details: console API.md §13.
 On a Penn-bag run (`fast`): 64 kB per keyframe, 115 keyframes mirrored at ~61 kB/s.
 
+**Needs the store's tail (live) mode.** The tailer is Hydra PR #221, which is not on Hydra
+`develop`. Without `hydra_python.image_store.indexer.tail_state` the agent logs
+`store mirror disabled: ...` once and runs without the mirror; everything else (prior-map
+pack/unpack included) works on `develop`.
+
 **Off by default.** The mirror is what fills the radio (5 robots need ~10 Mbit/s with it on), so
 the agent starts with sending off (`store_send: false`). The store is still tailed and armed, so
 the state shows the backlog. The console's Live link panel has an "Image store" switch per robot
@@ -155,10 +160,10 @@ to the last frame sent, so turning it on again continues the chain with nothing 
 
 ### Image-store codec and prior-map pack / unpack
 
-`fleetlink/image_transfer.py` (moved from `hydra_image_store.transfer`) encodes one store frame
+`fleetlink/image_transfer.py` (moved from the old `hydra_image_store.transfer`) encodes one store frame
 (row, calibration, RGB, depth) as a self-describing blob: `b"HISF"`, version byte, JSON header,
 payloads. It needs `zstandard` (`lossless` / `fast`) and cv2 or Pillow; a missing one raises
-`image_transfer.MissingDependency`. `hydra_image_store` stays the store reader and writer.
+`image_transfer.MissingDependency`. Hydra's `hydra_python.image_store` stays the store reader and writer.
 
 | compression | RGB | depth |
 |---|---|---|
@@ -172,10 +177,10 @@ full resolution, keeps safe source-relative paths, and otherwise names files lik
 timestamps must be integers and every path must resolve inside the destination store
 (`image_transfer.UnsafeFrame` otherwise).
 
-`fleetlink/image_pack.py` (moved from `hydra_image_store.pack`) packs a run's store into one tar
+`fleetlink/image_pack.py` (moved from the old `hydra_image_store.pack`) packs a run's store into one tar
 (optionally zstd-wrapped): `manifest.json`, `frames/<id>.hisf`, kept mask PNGs, then a
 `store.sqlite` snapshot with every row (paths of frames not shipped are NULL, as after `gc`).
-`unpack` builds `DEST/image_store.partial`, runs `hydra_image_store.check_store` and only then
+`unpack` builds `DEST/image_store.partial`, runs `hydra_python.image_store.check_store` and only then
 renames it to `DEST/image_store`. The console's Maps -> Transfer streams one into the other:
 
 ```
@@ -375,9 +380,12 @@ fleet_defaults:
 ```
 
 * **`router`** (the default). The base's `rmw_zenohd` connects router-to-router to every
-  robot (the endpoints the fleet tools deploy), so all ROS graphs merge across the radio. The
-  agent connects to its local router `tcp/127.0.0.1:7447`, and the relay is off.
-* **`fleetlink`**. Only fleetlink crosses the radio, and every ROS graph stays on its machine.
+  robot (the endpoints the fleet tools deploy), so all ROS graphs merge across the radio,
+  exactly as before fleetlink existed. The `fleetlink` / `fleetlink_base` windows of the
+  generated sessions start nothing and only print a message.
+* **`fleetlink`** (opt-in: `fleet_link: fleetlink` in the topology, or
+  `export ADT4_FLEET_LINK=fleetlink` before `run-adt4`). Only fleetlink crosses the radio, and
+  every ROS graph stays on its machine.
   * `generate_zenoh_endpoints()` returns `[]` for every machine, so a zenoh deploy (fleet TUI,
     `fleet-adt4 zenoh`, the launch workflow's phase 0, the console's *Deploy config*) clears
     the base router's robot links.
@@ -391,8 +399,11 @@ fleet_defaults:
     * The bridge and the console's receiver connect to it over loopback. The console's
       `--zenoh-connect` defaults to `tcp/127.0.0.1:<fleetlink_port>` when
       `ADT4_FLEET_LINK=fleetlink`.
-  * On each robot, the agent connects to the fleetlink router as a zenoh client over the radio
-    and runs the ROS relay (`-p relay_config:=default`).
+  * On each robot, the `fleetlink` window of the mapping sessions (`spot*`, `phoenix*`) starts
+    the agent, which connects to the fleetlink router as a zenoh client over the radio and runs
+    the ROS relay (`-p relay_config:=default`).
+  * `run-adt4` starts the local `rmw_zenohd` with `ZENOH_CONFIG_OVERRIDE='connect/endpoints=[]'`,
+    so it dials no other machine even when `ZENOH_ROUTER_CONFIG_URI` points at a fleet config.
 
 **Environment.** `run-adt4` derives these from the topology unless they are already set
 (`python -m dcist_launch_system.fleet_env <machine> [--network NAME]` prints them as shell
@@ -444,9 +455,10 @@ zsh -c 'source /opt/ros/jazzy/setup.zsh; source ~/dcist_ws/install/setup.zsh; \
   (latency, bandwidth, loss, congestion, C4 query timeouts and budget).
 * `test_zenoh_smoke` (graph, mesh, C0, camera query, grid, paths, live h264 video) and `test_ros_smoke` (a real
   `hydra_ros.DsgPublisher` plus OccupancyGrid/Path/MarkerArray/Image publishers into `AgentNode`)
-  start a **throwaway** `rmw_zenohd` on `127.0.0.1:17448` and use private ROS domains (88, 89).
+  start a **throwaway** `rmw_zenohd` on `127.0.0.1:17448` (`FLEETLINK_TEST_PORT` moves it) and
+  use private ROS domains (88, 89).
   `test_zenoh_open_without_router_then_connect_and_restart` opens the sessions with nothing on
-  `127.0.0.1:17449`, then starts a router there, kills and restarts it.
+  the next port (17449), then starts a router there, kills and restarts it.
   They never touch the live router on 7447. They skip when ROS or that port is unavailable.
 * `test_relay` exercises `RelayConfig` / `RelayCore` over the emulator. It covers config
   rejection (both directions, unknown mode/key/class) and the platform filter on the real
@@ -479,7 +491,7 @@ zsh -c 'source /opt/ros/jazzy/setup.zsh; source ~/dcist_ws/install/setup.zsh; \
   with no re-execution. About 50 s in all. Teardown kills every process group and checks that
   none is left. The bench checklist is [`docs/bench_cutover.md`](docs/bench_cutover.md).
 * **Benchmark:** `test_integration_pennovation.py` streams the real Pennovation map
-  (`~/data/pennovation_2025/courtyard-alleyways/output/hydra/backend/dsg_with_mesh.json`)
+  (`FLEETLINK_PENN_MAP`, default `~/data/pennovation_2025/courtyard-alleyways/output/hydra/backend/dsg_with_mesh.json`)
   over an emulated 2 Mbit/s, 150 ms, 3 % loss link. The map is revealed in 20 stages along the
   recorded trajectory, like a robot mapping. The test asserts graph convergence ≤ 60 s after the
   last reveal, full mesh ≤ 600 s, C1 staleness < 1 s, and budget compliance, and prints the

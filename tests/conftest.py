@@ -11,9 +11,13 @@ HERE = os.path.dirname(__file__)
 sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..")))
 sys.path.insert(0, HERE)
 
-ROUTER_PORT = 17448  # throwaway router; NEVER 7447 (the live system's router)
+# throwaway router; NEVER 7447 (the live system's router). FLEETLINK_TEST_PORT moves
+# it (and the late router on the next port) when another run uses these ports.
+ROUTER_PORT = int(os.environ.get("FLEETLINK_TEST_PORT", 17448))
 ROUTER_ENDPOINT = f"tcp/127.0.0.1:{ROUTER_PORT}"
-LATE_ROUTER_PORT = 17449  # started after the sessions (no-router / restart tests)
+LATE_ROUTER_PORT = (
+    ROUTER_PORT + 1
+)  # started after the sessions (no-router / restart tests)
 
 
 def pytest_configure(config):
@@ -82,7 +86,7 @@ class Router:
 
 @pytest.fixture(scope="session")
 def zenoh_router():
-    """A throwaway rmw_zenohd on 127.0.0.1:17448 (killed at teardown)."""
+    """A throwaway rmw_zenohd on 127.0.0.1:ROUTER_PORT (killed at teardown)."""
     router = Router(ROUTER_PORT)
     router.start()
     yield router.endpoint
@@ -91,7 +95,7 @@ def zenoh_router():
 
 @pytest.fixture
 def late_router():
-    """A router on 127.0.0.1:17449 that the test starts / stops itself."""
+    """A router on 127.0.0.1:LATE_ROUTER_PORT that the test starts / stops itself."""
     router = Router(LATE_ROUTER_PORT)
     if _port_open(LATE_ROUTER_PORT):
         pytest.skip(f"port {LATE_ROUTER_PORT} already in use")

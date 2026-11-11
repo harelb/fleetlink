@@ -787,7 +787,9 @@ class SharedChannel:
     :meth:`advance` instead of the links' own ``advance``.
     """
 
-    def __init__(self, links: list, clock: Callable[[], float], airtime: list | None = None):
+    def __init__(
+        self, links: list, clock: Callable[[], float], airtime: list | None = None
+    ):
         self.links = list(links)
         self.clock = clock
         self.airtime = list(airtime) if airtime else [1.0] * len(self.links)

@@ -42,7 +42,9 @@ def _state(tr):
 def _req(tr, rid, op, args=None, seq=0):
     tr.inject(
         "adt4/r/ctl/req",
-        env_bytes("base", "ctl/req", seq, "S", {"id": rid, "op": op, "args": args or {}}),
+        env_bytes(
+            "base", "ctl/req", seq, "S", {"id": rid, "op": op, "args": args or {}}
+        ),
     )
 
 
@@ -113,7 +115,12 @@ def test_phoenix_progress_distance_done_and_frames():
     plan = {"plan_id": "5.000000007", "stamp": 5.0, "frame": "gauss/map",
             "end": [3.0, 4.0, 0.0], "left": True}  # fmt: skip
     p = phoenix_progress(plan, POSE)
-    assert p == {"plan_id": "5.000000007", "stamp": 5.0, "dist_to_goal_m": 5.0, "done": False}
+    assert p == {
+        "plan_id": "5.000000007",
+        "stamp": 5.0,
+        "dist_to_goal_m": 5.0,
+        "done": False,
+    }
     near = dict(POSE, x=2.5, y=4.5, z=7.0)  # xy only
     assert phoenix_progress(plan, near)["done"] is True
     # never away from the end since the plan arrived: not done yet
@@ -127,7 +134,9 @@ def test_phoenix_progress_distance_done_and_frames():
 
 def test_phoenix_progress_in_state():
     tr, clock, core = _agent(platform="phoenix")
-    core.on_plan_path([[0, 0, 0], [1, 1, 0], [0.5, 0.2, 0]], "gauss/map", 1700000000, 42)
+    core.on_plan_path(
+        [[0, 0, 0], [1, 1, 0], [0.5, 0.2, 0]], "gauss/map", 1700000000, 42
+    )
     _run(clock, core, 0.5)
     prog = _state(tr)["phoenix_progress"]
     assert prog["plan_id"] == "1700000000.000000042"
@@ -397,7 +406,7 @@ def test_lidar_subscription_depth1_best_effort_own_group():
     assert calls == []  # off: not subscribed
     core._set_lidar(True)
     an._update_lidar()
-    (args, kw), = calls
+    ((args, kw),) = calls
     assert args[1] == "/r/ouster/points" and args[3].depth == 1
     assert kw["callback_group"] is an._lidar_group
     # the time gate comes first: a cloud right after the last one is not touched

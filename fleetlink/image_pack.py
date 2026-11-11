@@ -1,23 +1,22 @@
 """Pack a run's hydra image store into one compressed archive and rebuild it elsewhere.
 
-Moved here from ``hydra_image_store.pack`` (the store reader, writer and
-``check_store`` stay in ``hydra_image_store``). CLI::
+The store reader, writer and ``check_store`` are Hydra's ``hydra_python.image_store``.
+CLI::
 
     python -m fleetlink.image_pack pack RUN_DIR OUT.tar[.zst] [--frames keyframes|all]
         [--compression none|lossless|fast] [--zstd-level N] [--no-masks] [--quiet]
     python -m fleetlink.image_pack unpack ARCHIVE DEST_RUN_DIR [--store-name image_store]
         [--overwrite] [--no-check] [--dsg dsg.json] [--quiet]
 
-(``hydra-image-store check`` checks a store.)
+(``python -m hydra_python.image_store check`` checks a store.)
 
 What is packed: the *indexed* store, not the raw image logs. Hydra/Khronos log
-keyframe InputData zips (EXR depth, ~1.2 MB each), track dirs and event logs;
-``hydra-image-store tail`` / ``index`` turn them into ``<run>/image_store`` with
+keyframe InputData zips (float depth, ~1.2 MB each), track dirs and event logs;
+the image store's indexer (or its tailer, where Hydra has one) turns them into ``<run>/image_store`` with
 JPEG colour and 16-bit PNG depth, about 7x smaller than the zips (Penn window A:
 146 MB store vs 1.15 GB zips), and with every anchor, binding and alias already
-resolved, so the destination needs no re-index (and no hydra_image_store
-indexer). ``pack`` indexes a run that has raw logs but no up-to-date store first
-(``hydra_image_store.indexer.ensure_indexed``; skipped while a tailer follows
+resolved, so the destination needs no re-index. ``pack`` indexes a run that has raw logs but no up-to-date store first
+(``hydra_python.image_store.indexer.ensure_indexed``; skipped while a tailer follows
 it). The console's map transfer excludes the raw log dirs from its rsync for
 the same reason.
 
@@ -58,21 +57,10 @@ import tempfile
 import time
 from typing import BinaryIO, Callable
 
-from hydra_image_store import check_store
-from hydra_image_store.store import DB_NAME, ImageStore, _Db
-
-try:
-    from hydra_image_store.check import resolve_store_dir
-except ImportError:  # hydra_image_store before check.py (pack.py still in it)
-    from hydra_image_store.store import _resolve_db
-
-    def resolve_store_dir(path: str | os.PathLike) -> pathlib.Path:
-        """``<run>/image_store`` for a run directory, else the store directory itself."""
-        p = pathlib.Path(path).expanduser()
-        if (p / "image_store" / DB_NAME).exists():
-            return (p / "image_store").absolute()
-        return _resolve_db(p).parent
-
+from hydra_python.image_store import check_store
+from hydra_python.image_store.check import resolve_store_dir
+from hydra_python.image_store.indexer import ensure_indexed
+from hydra_python.image_store.store import DB_NAME, ImageStore, _Db
 
 from . import image_transfer as transfer
 
@@ -153,10 +141,6 @@ class _CountingWriter(io.RawIOBase):
 
 def _ensure_indexed(src) -> None:
     """Build / refresh ``<run>/image_store`` from the run's raw image logs."""
-    try:
-        from hydra_image_store.indexer import ensure_indexed
-    except ImportError:  # hydra_image_store before the indexer: store written by Hydra
-        return
     try:
         ensure_indexed(src)
     except (OSError, sqlite3.Error) as exc:  # e.g. read-only medium: pack what is there

@@ -20,7 +20,13 @@ from fleetlink.agent import AgentCore, graph_inputs
 from fleetlink.receiver import Receiver
 from fleetlink.transport import LinkEmulator, VirtualClock
 
-MAP = "~/data/pennovation_2025/courtyard-alleyways/output/hydra/backend/dsg_with_mesh.json"
+# a Hydra backend DSG with mesh (Pennovation courtyard-alleyways run); override with FLEETLINK_PENN_MAP
+MAP = os.environ.get(
+    "FLEETLINK_PENN_MAP",
+    os.path.expanduser(
+        "~/data/pennovation_2025/courtyard-alleyways/output/hydra/backend/dsg_with_mesh.json"
+    ),
+)
 ROBOT = "penn"
 STAGES = 20
 STAGE_PERIOD = 2.0  # s between graph reveals (Hydra publishes <= 1 Hz)
@@ -101,7 +107,9 @@ class Sim:
         self.link = LinkEmulator(self.clock, **(link or LINK))
         # full mesh: this benchmark measures the heavy case (the decimated LOD
         # is ~7x smaller; tests/test_mesh_lod.py covers it)
-        self.rx = Receiver(self.link.base, None, clock=self.clock, threaded=False, mesh_lod=None)
+        self.rx = Receiver(
+            self.link.base, None, clock=self.clock, threaded=False, mesh_lod=None
+        )
         self.rx.start()
         self.cfg = cfg
         self.agent = AgentCore(ROBOT, self.link.robot, cfg, self.clock)

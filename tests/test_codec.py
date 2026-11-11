@@ -177,7 +177,9 @@ def test_boundary_delta_only_on_change():
     recs = {"t(1)": _place("t(1)"), "t(2)": _place("t(2)", seed=2)}
     st.apply(st.diff(recs, set()))
     # sub-cm radius jitter: no resend
-    jit = dataclasses.replace(recs["t(1)"], radii=tuple(v + 0.001 for v in recs["t(1)"].radii))
+    jit = dataclasses.replace(
+        recs["t(1)"], radii=tuple(v + 0.001 for v in recs["t(1)"].radii)
+    )
     assert st.diff({**recs, "t(1)": jit}, set()).empty()
     # a state flip: resend just that node, and the mirror converges
     flipped = list(recs["t(2)"].states)
@@ -244,12 +246,22 @@ def test_pack_tile_wide_indices_and_extremes():
     q[0] = (-32768, 32767, 0)
     q[1] = (32767, -32768, 0)
     idx = rng.permutation(np.tile(np.arange(nv), 3)).reshape(-1, 3).astype(np.uint32)
-    t = {"key": "0_0_0", "origin": [8.0, -16.0, 0.0], "scale": 0.01, "pos": q.tobytes(),
-         "col": rng.integers(0, 256, (nv, 3), dtype=np.uint8).tobytes(), "idx": idx.tobytes(),
-         "nv": nv, "nf": len(idx), "hash": "x"}
+    t = {
+        "key": "0_0_0",
+        "origin": [8.0, -16.0, 0.0],
+        "scale": 0.01,
+        "pos": q.tobytes(),
+        "col": rng.integers(0, 256, (nv, 3), dtype=np.uint8).tobytes(),
+        "idx": idx.tobytes(),
+        "nv": nv,
+        "nf": len(idx),
+        "hash": "x",
+    }
     p = codec.pack_tile(t)
     assert p["ib"] == 4
-    np.testing.assert_array_equal(_tile_triangles(codec.unpack_tile(p)), _tile_triangles(t))
+    np.testing.assert_array_equal(
+        _tile_triangles(codec.unpack_tile(p)), _tile_triangles(t)
+    )
 
 
 def test_decimate_tiles_keeps_keys_and_has_no_cracks():
@@ -257,14 +269,21 @@ def test_decimate_tiles_keeps_keys_and_has_no_cracks():
     tiles = codec.tile_mesh(pos, col, faces, tile_size=8.0)
     dec = codec.decimate_tiles(tiles, 0.4)
     assert set(dec) <= set(tiles) and len(dec) >= len(tiles) - 1
-    assert sum(t["nf"] for t in dec.values()) < sum(t["nf"] for t in tiles.values()) * 0.8  # bumpy: z noise 0.2 m
+    assert (
+        sum(t["nf"] for t in dec.values()) < sum(t["nf"] for t in tiles.values()) * 0.8
+    )  # bumpy: z noise 0.2 m
     # every shared border edge of the full mesh maps to identical vertices in
     # both tiles: collect each tile's quantised vertex set and check that
     # neighbouring tiles agree on all vertices near their common border
     verts = {}
     for k, t in dec.items():
         oq = np.round(np.asarray(t["origin"]) / t["scale"]).astype(np.int64)
-        verts[k] = {tuple(v) for v in (np.frombuffer(t["pos"], np.int16).reshape(-1, 3).astype(np.int64) + oq)}
+        verts[k] = {
+            tuple(v)
+            for v in (
+                np.frombuffer(t["pos"], np.int16).reshape(-1, 3).astype(np.int64) + oq
+            )
+        }
     shared = 0
     for a in dec:
         for b in dec:

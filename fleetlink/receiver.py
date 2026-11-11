@@ -116,12 +116,16 @@ class _Robot:
     def __init__(self, name: str):
         self.name = name
         self.epoch: str | None = None
-        self.store_send_t = -1e9  # last ``store_send`` re-sent to match the wanted state
+        self.store_send_t = (
+            -1e9
+        )  # last ``store_send`` re-sent to match the wanted state
         self.seqs: dict[str, int] = {}
         self.graph = GraphState()
         self.tiles: dict[str, dict] = {}
         self.manifest: dict[str, str] = {}
-        self.mesh_lod: dict | None = None  # the robot's LOD (manifest ``lod``); None: full, old robot
+        self.mesh_lod: dict | None = (
+            None  # the robot's LOD (manifest ``lod``); None: full, old robot
+        )
         # odometric mesh mode: deforms the odometric tiles with mesh/values
         self.deform = None
         self.state: dict = {}
@@ -555,7 +559,11 @@ class Receiver:
             w = self._mesh_lod_wanted.get(robot)
             if w is not None:
                 return {"level": w["level"], "tiles": dict(w["tiles"])}
-            return None if self.default_mesh_lod is None else {"level": self.default_mesh_lod, "tiles": {}}
+            return (
+                None
+                if self.default_mesh_lod is None
+                else {"level": self.default_mesh_lod, "tiles": {}}
+            )
 
     def set_mesh_lod(self, robot: str, level: str, tiles: list | None = None) -> str:
         """C0 ``mesh_lod {level, tiles?}``: the robot re-sends its mesh tiles at
@@ -565,9 +573,15 @@ class Receiver:
         if level not in codec.MESH_LODS:
             raise ValueError(f"unknown mesh LOD {level!r} (one of {codec.MESH_LODS})")
         with self._lock:
-            cur = self._mesh_lod_wanted.get(robot) or {"level": self.default_mesh_lod or "full", "tiles": {}}
+            cur = self._mesh_lod_wanted.get(robot) or {
+                "level": self.default_mesh_lod or "full",
+                "tiles": {},
+            }
             if tiles:
-                cur = {"level": cur["level"], "tiles": {**cur["tiles"], **{str(k): level for k in tiles}}}
+                cur = {
+                    "level": cur["level"],
+                    "tiles": {**cur["tiles"], **{str(k): level for k in tiles}},
+                }
             else:
                 cur = {"level": level, "tiles": {}}
             self._mesh_lod_wanted[robot] = cur
@@ -583,7 +597,11 @@ class Receiver:
         with self._lock:
             self._store_send_wanted[robot] = bool(enable)
             self._robot(robot).store_send_t = self.clock()
-            for rid in [k for k, v in self._pending.items() if v["robot"] == robot and v["req"]["op"] == "store_send"]:
+            for rid in [
+                k
+                for k, v in self._pending.items()
+                if v["robot"] == robot and v["req"]["op"] == "store_send"
+            ]:
                 del self._pending[rid]
         return self._send(robot, "store_send", {"enable": bool(enable)})
 
@@ -592,11 +610,18 @@ class Receiver:
         store, or an agent without the switch) and what this base asked."""
         with self._lock:
             r = self._robots.get(robot)
-            return self._store_send_status(r) if r is not None else {"robot": None, "wanted": self._store_send_wanted.get(robot)}
+            return (
+                self._store_send_status(r)
+                if r is not None
+                else {"robot": None, "wanted": self._store_send_wanted.get(robot)}
+            )
 
     def _store_send_status(self, r: _Robot) -> dict:
         st = (r.state or {}).get("store") or {}
-        return {"robot": st.get("send") if st.get("enabled") else None, "wanted": self._store_send_wanted.get(r.name)}
+        return {
+            "robot": st.get("send") if st.get("enabled") else None,
+            "wanted": self._store_send_wanted.get(r.name),
+        }
 
     def _store_send_reconcile(self, r: _Robot, st: dict | None, now: float) -> None:
         """Lock held: re-ask ``store_send`` when the robot's state disagrees."""
@@ -605,7 +630,10 @@ class Receiver:
             return
         if bool(st["send"]) == want or now - r.store_send_t < self.retry_s:
             return
-        if any(v["robot"] == r.name and v["req"]["op"] == "store_send" for v in self._pending.values()):
+        if any(
+            v["robot"] == r.name and v["req"]["op"] == "store_send"
+            for v in self._pending.values()
+        ):
             return
         r.store_send_t = now
         self._pending_send(r.name, "store_send", {"enable": want})
@@ -619,7 +647,11 @@ class Receiver:
             r.lidar_t = r.lidar_read_t = self.clock()
             if not enable:
                 r.lidar = None
-            for rid in [k for k, v in self._pending.items() if v["robot"] == robot and v["req"]["op"] == "lidar"]:
+            for rid in [
+                k
+                for k, v in self._pending.items()
+                if v["robot"] == robot and v["req"]["op"] == "lidar"
+            ]:
                 del self._pending[rid]
         return self._send(robot, "lidar", {"enable": bool(enable)})
 
@@ -642,7 +674,10 @@ class Receiver:
             return
         if bool(st["enabled"]) == want or now - r.lidar_t < self.retry_s:
             return
-        if any(v["robot"] == r.name and v["req"]["op"] == "lidar" for v in self._pending.values()):
+        if any(
+            v["robot"] == r.name and v["req"]["op"] == "lidar"
+            for v in self._pending.values()
+        ):
             return
         r.lidar_t = now
         self._pending_send(r.name, "lidar", {"enable": want})
@@ -655,7 +690,11 @@ class Receiver:
         if not self.lidar_idle_s or not (want or (want is None and streaming)):
             return
         if now - r.lidar_read_t < self.lidar_idle_s:
-            if want and self.lidar_refresh_s and now - r.lidar_t >= self.lidar_refresh_s:
+            if (
+                want
+                and self.lidar_refresh_s
+                and now - r.lidar_t >= self.lidar_refresh_s
+            ):
                 r.lidar_t = now  # keepalive for the agent's lidar_ttl_s
                 self._queue_req(r.name, {"id": f"{self._session}-l{next(self._ids)}",
                                          "op": "lidar", "args": {"enable": True}})  # fmt: skip
@@ -663,7 +702,11 @@ class Receiver:
         self._lidar_wanted[r.name] = False
         r.lidar = None
         r.lidar_t = now
-        for rid in [k for k, v in self._pending.items() if v["robot"] == r.name and v["req"]["op"] == "lidar"]:
+        for rid in [
+            k
+            for k, v in self._pending.items()
+            if v["robot"] == r.name and v["req"]["op"] == "lidar"
+        ]:
             del self._pending[rid]
         self._pending_send(r.name, "lidar", {"enable": False})
 
@@ -782,7 +825,9 @@ class Receiver:
             r.lidar = self._lidar_frame(p, seq)
             if r.lidar_read_t < 0:  # unasked stream: the idle time starts now
                 r.lidar_read_t = now
-            events.append(("lidar", {k: r.lidar.get(k) for k in ("frame", "n", "stamp", "seq")}))
+            events.append(
+                ("lidar", {k: r.lidar.get(k) for k in ("frame", "n", "stamp", "seq")})
+            )
         elif stream == "mesh/tile":
             r.tiles[p["key"]] = p
             r.tile_req_t.pop(p["key"], None)
@@ -1013,8 +1058,15 @@ class Receiver:
         """What the console shows next to a robot's mesh: the LOD the robot
         reports (``lod`` None: an old robot, full tiles), the one asked, tiles
         still to arrive and the bytes held."""
-        pending = sum(1 for k, h in r.manifest.items() if k not in r.tiles or r.tiles[k].get("hash") != h)
-        held = sum(len(t.get("pos", b"")) + len(t.get("col", b"")) + len(t.get("idx", b"")) for t in r.tiles.values())
+        pending = sum(
+            1
+            for k, h in r.manifest.items()
+            if k not in r.tiles or r.tiles[k].get("hash") != h
+        )
+        held = sum(
+            len(t.get("pos", b"")) + len(t.get("col", b"")) + len(t.get("idx", b""))
+            for t in r.tiles.values()
+        )
         w = self._mesh_lod_wanted.get(r.name)
         wanted = w["level"] if w else self.default_mesh_lod
         return {
@@ -1157,10 +1209,14 @@ class Receiver:
             r.state.setdefault("stats", {})["auto"] = res["auto"]
         if pend is not None and pend["req"]["op"] == "lidar" and "enabled" in res:
             if isinstance(r.state, dict) and isinstance(r.state.get("lidar"), dict):
-                r.state["lidar"]["enabled"] = bool(res["enabled"])  # shown before the next state
+                r.state["lidar"]["enabled"] = bool(
+                    res["enabled"]
+                )  # shown before the next state
         if pend is not None and pend["req"]["op"] == "store_send" and "send" in res:
             if isinstance(r.state, dict) and isinstance(r.state.get("store"), dict):
-                r.state["store"]["send"] = bool(res["send"])  # shown before the next state
+                r.state["store"]["send"] = bool(
+                    res["send"]
+                )  # shown before the next state
         return []
 
     # ---------------------------------------------------------------- tick

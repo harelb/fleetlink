@@ -20,7 +20,14 @@ def _lc(r1, r2, s1=3, s2=7, assoc=5):
 
 
 def _align(T):
-    return {"parent": "map", "child": "r/odom", "T": T, "stamp": 0.0, "ok": True, "reason": ""}
+    return {
+        "parent": "map",
+        "child": "r/odom",
+        "T": T,
+        "stamp": 0.0,
+        "ok": True,
+        "reason": "",
+    }
 
 
 def test_loop_closure_to_dict_reads_the_roman_message():
@@ -38,7 +45,13 @@ def test_counts_only_closures_between_this_robot_and_another():
     assert (st["prior_lcs"], st["self_lcs"], st["best_assoc"]) == (2, 1, 9)
     assert st["last_lc_age_s"] == 7.0
     newest, older = st["lcs"]
-    assert newest == {"prior": 1, "live_submap": 14, "prior_submap": 5, "assoc": 6, "age_s": 7.0}
+    assert newest == {
+        "prior": 1,
+        "live_submap": 14,
+        "prior_submap": 5,
+        "assoc": 6,
+        "age_s": 7.0,
+    }
     assert older["live_submap"] == 12 and older["prior_submap"] == 4
 
 

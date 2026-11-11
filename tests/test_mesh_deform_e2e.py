@@ -24,7 +24,9 @@ RUN = os.path.expanduser("~/adt4_output/imgstore_lc_on_20261017/hydra/backend")
 ROBOT = "lc"
 DT = 0.05
 STAGES = 10
-LINK = dict(bandwidth=2_500_000.0, latency=0.15, loss=0.01, seed=3)  # 20 Mbit/s: fast test
+LINK = dict(
+    bandwidth=2_500_000.0, latency=0.15, loss=0.01, seed=3
+)  # 20 Mbit/s: fast test
 
 
 def _load():
@@ -44,7 +46,9 @@ def _load():
         faces = np.loadtxt(f, max_rows=nf, dtype=np.int64)[:, 1:4]
     pos = a[:, :3].astype(np.float32)
     col = a[:, 3:6].astype(np.uint8)
-    st = a[:, 7].astype(np.uint64) * np.uint64(1_000_000_000) + a[:, 8].astype(np.uint64)
+    st = a[:, 7].astype(np.uint64) * np.uint64(1_000_000_000) + a[:, 8].astype(
+        np.uint64
+    )
     return g, pos, col, st, faces
 
 
@@ -106,13 +110,19 @@ def test_loop_closure_costs_values_not_tiles():
         smax = max(smax, int(d["stamp"].max()))
         reveal = np.flatnonzero((g["ctrl_stamp"] <= smax))
         sim.agent.on_mesh_graph_incremental(
-            [(int(i), int(g["ctrl_stamp"][i]), (*g["ctrl"][i], 0, 0, 0, 1)) for i in reveal]
+            [
+                (int(i), int(g["ctrl_stamp"][i]), (*g["ctrl"][i], 0, 0, 0, 1))
+                for i in reveal
+            ]
         )
         sim.run(3.0)
     # Hydra publishes every control point; the last ones' stamps can be newer than
     # the newest vertex of the saved mesh
     sim.agent.on_mesh_graph_incremental(
-        [(int(i), int(g["ctrl_stamp"][i]), (*g["ctrl"][i], 0, 0, 0, 1)) for i in range(len(g["ctrl"]))]
+        [
+            (int(i), int(g["ctrl_stamp"][i]), (*g["ctrl"][i], 0, 0, 0, 1))
+            for i in range(len(g["ctrl"]))
+        ]
     )
     for _ in range(60):
         if sim.converged():
@@ -123,7 +133,12 @@ def test_loop_closure_costs_values_not_tiles():
     tiles_before = {k: t["hash"] for k, t in sim.rx.tiles(ROBOT).items()}
 
     # the loop closure: optimized control-point poses
-    sim.agent.on_mesh_graph([(int(i), int(g["ctrl_stamp"][i]), tuple(g["pose"][i])) for i in np.flatnonzero(g["valid"])])
+    sim.agent.on_mesh_graph(
+        [
+            (int(i), int(g["ctrl_stamp"][i]), tuple(g["pose"][i]))
+            for i in np.flatnonzero(g["valid"])
+        ]
+    )
     sim.run(5.0)
     lc_bytes = sim.c3() - before
     shown = sim.rx.tiles(ROBOT)
@@ -139,18 +154,34 @@ def test_loop_closure_costs_values_not_tiles():
         o = np.asarray(t["origin"])
         vids.append(tile_vids(t))
         base.append(np.frombuffer(t["pos"], np.int16).reshape(-1, 3) * t["scale"] + o)
-        got.append(np.frombuffer(shown[k]["pos"], np.int16).reshape(-1, 3) * t["scale"] + o)
+        got.append(
+            np.frombuffer(shown[k]["pos"], np.int16).reshape(-1, 3) * t["scale"] + o
+        )
     vid = np.concatenate(vids)
     got = np.concatenate(got)
     p0 = np.concatenate(base).astype(np.float32)
     stq = (st[vid] // np.uint64(1_000_000)) * np.uint64(1_000_000)
     back, valid = deform.unpack_poses(deform.pack_poses(g["pose"], g["valid"]))
-    want = deform.deform(p0, stq, g["ctrl"], g["ctrl_stamp"], back, valid, 3, 15.0, indices=np.argsort(vid, kind="stable"))
+    want = deform.deform(
+        p0,
+        stq,
+        g["ctrl"],
+        g["ctrl_stamp"],
+        back,
+        valid,
+        3,
+        15.0,
+        indices=np.argsort(vid, kind="stable"),
+    )
     err = np.linalg.norm(got - want, axis=1)
     assert np.percentile(err, 99.9) <= 0.02 and err.max() < 0.05
 
     # DSG mode would re-send every tile whose deformed content changed
-    dsg_tiles = codec.tile_mesh(want.astype(np.float64), np.zeros((len(want), 3), np.uint8), np.zeros((0, 3), np.int64))
+    dsg_tiles = codec.tile_mesh(
+        want.astype(np.float64),
+        np.zeros((len(want), 3), np.uint8),
+        np.zeros((0, 3), np.int64),
+    )
     print(f"\nodometric mode: mesh {sum(len(t['pos']) + len(t['col']) + len(t['idx']) for t in raw.values()) / 1e6:.1f} MB "
           f"raw tiles; loop closure cost {lc_bytes / 1e3:.1f} kB on C3")  # fmt: skip
     assert dsg_tiles is not None

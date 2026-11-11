@@ -57,7 +57,7 @@ def fleet(tmp_path_factory):
 
 
 def _no_non_droppable(fleet):
-    bad = [l for l in fleet.logs().splitlines() if NON_DROPPABLE in l]
+    bad = [line for line in fleet.logs().splitlines() if NON_DROPPABLE in line]
     assert not bad, "zenoh closed a transport (#1876):\n" + "\n".join(bad[:10])
 
 
@@ -87,7 +87,10 @@ def test_graphs_are_isolated(fleet):
     liveliness tokens each ROS router knows (any domain)."""
     expect = {
         "base": {("fleetlink_bridge", "/"), ("harness_base", "/")},
-        **{r: {("fleetlink_agent", f"/{r}"), (f"harness_robot_{r}", "/")} for r in fleet.robot_names},  # fmt: skip
+        **{
+            r: {("fleetlink_agent", f"/{r}"), (f"harness_robot_{r}", "/")}
+            for r in fleet.robot_names
+        },  # fmt: skip
     }
     helpers = {"base": fleet.base, **{r: fleet.robots[r]["helper"] for r in fleet.robot_names}}  # fmt: skip
     for graph, h in helpers.items():
@@ -120,7 +123,9 @@ def test_relay_round_trips_per_robot(fleet):
         if all(tf.get(r) is not None for r in fleet.robot_names):
             break
         time.sleep(0.1)
-    assert tf == {r: pytest.approx(float(i + 1)) for i, r in enumerate(fleet.robot_names)}
+    assert tf == {
+        r: pytest.approx(float(i + 1)) for i, r in enumerate(fleet.robot_names)
+    }
 
     for r in fleet.robot_names:
         h = fleet.robots[r]["helper"]
@@ -132,7 +137,9 @@ def test_relay_round_trips_per_robot(fleet):
     m = fleet.base.mark()
     for r in fleet.robot_names:
         st = fleet.base.wait_for(
-            lambda e, r=r: e.get("ev") == "link_status" and e.get("robot") == r, 5, since=m
+            lambda e, r=r: e.get("ev") == "link_status" and e.get("robot") == r,
+            5,
+            since=m,
         )
         assert st and st["connected"] and st["cfg_match"] is True and st["rtt"] is not None, st  # fmt: skip
 
@@ -171,11 +178,14 @@ def test_throttled_link_keeps_commands_flowing(fleet):
               f"r2 plan rt {lat2}, hold {rep and rep.get('dt')}, C1 max gap r1 {gap1:.2f} s "
               f"r2 {gap2:.2f} s; camera {cam_n} B in {cam_dt}; grids {grids} in "
               f"{t1 - t0:.1f} s")  # fmt: skip
-        errs = (h1.find(lambda e: e.get('ev') in ('error', 'warn')), h1.ask('grid_count', 'grid_count'))
+        errs = (
+            h1.find(lambda e: e.get("ev") in ("error", "warn")),
+            h1.ask("grid_count", "grid_count"),
+        )
         assert grids and min(grids) > 50_000, f"no large grid arrived: {grids} {errs}"
         assert cam is not None and cam.get("format") == "jpeg" and cam_n > 20_000, (cam_n, cam and cam.get("error"))  # fmt: skip
         assert cam_dt < 5.0, cam_dt
-        assert rate > 0.7 * THROTTLE_BPS, f'link not saturated ({rate:.0f} B/s) {errs}'
+        assert rate > 0.7 * THROTTLE_BPS, f"link not saturated ({rate:.0f} B/s) {errs}"
         assert all(x is not None and x < 3.0 for x in lat1), lat1
         assert rep is not None and rep["ok"] and rep["dt"] < 4.0, rep
         assert gap1 < 3.0, gap1

@@ -580,7 +580,11 @@ def decimate_mesh(pos, col, faces, cell: float = DEFAULT_DECIMATE_CELL):
     f = inv[faces.astype(np.int64)]
     f = f[(f[:, 0] != f[:, 1]) & (f[:, 1] != f[:, 2]) & (f[:, 0] != f[:, 2])]
     if len(f) == 0:
-        return np.zeros((0, 3), np.float32), np.zeros((0, 3), np.uint8), np.zeros((0, 3), np.uint32)
+        return (
+            np.zeros((0, 3), np.float32),
+            np.zeros((0, 3), np.uint8),
+            np.zeros((0, 3), np.uint32),
+        )
     # the same triangle from several original faces (either winding): keep one
     srt = np.sort(f, axis=1)
     _, first = np.unique((srt[:, 0] * n + srt[:, 1]) * n + srt[:, 2], return_index=True)
@@ -642,7 +646,9 @@ def decode_tile(tile: dict):
     return pos, col, idx
 
 
-def decimate_tiles(tiles: dict[str, dict], cell: float = DEFAULT_DECIMATE_CELL) -> dict[str, dict]:
+def decimate_tiles(
+    tiles: dict[str, dict], cell: float = DEFAULT_DECIMATE_CELL
+) -> dict[str, dict]:
     """``decimate_mesh`` applied to already tiled meshes, keeping every tile's key.
 
     Vertex clustering runs over *all* tiles at once, in the tiles' integer
@@ -678,7 +684,9 @@ def decimate_tiles(tiles: dict[str, dict], cell: float = DEFAULT_DECIMATE_CELL) 
     mc = np.empty((n, 3), np.uint8)
     for k in range(3):
         mq[:, k] = np.round(np.bincount(inv, weights=q[:, k], minlength=n) / cnt)
-        mc[:, k] = np.clip(np.round(np.bincount(inv, weights=col[:, k], minlength=n) / cnt), 0, 255)
+        mc[:, k] = np.clip(
+            np.round(np.bincount(inv, weights=col[:, k], minlength=n) / cnt), 0, 255
+        )
     out = {}
     for i, (key, t) in enumerate(items):
         idx = np.frombuffer(t["idx"], np.uint32).reshape(-1, 3).astype(np.int64)
@@ -687,7 +695,9 @@ def decimate_tiles(tiles: dict[str, dict], cell: float = DEFAULT_DECIMATE_CELL) 
         if len(f) == 0:
             continue
         srt = np.sort(f, axis=1)
-        _, first = np.unique((srt[:, 0] * n + srt[:, 1]) * n + srt[:, 2], return_index=True)
+        _, first = np.unique(
+            (srt[:, 0] * n + srt[:, 1]) * n + srt[:, 2], return_index=True
+        )
         f = f[np.sort(first)]
         used, remap = np.unique(f.reshape(-1), return_inverse=True)
         oq = np.round(np.asarray(t["origin"], np.float64) / scale).astype(np.int64)
@@ -769,7 +779,9 @@ def pack_tile(tile: dict) -> dict:
         "enc": PACKED_TILE_ENCODING,
         "ib": ib,
         "pos": b"".join(_planes(_zigzag_delta(q[:, k], 16)) for k in range(3)),
-        "col": b"".join(np.diff(c[:, k], prepend=np.uint8(0)).tobytes() for k in range(3)),
+        "col": b"".join(
+            np.diff(c[:, k], prepend=np.uint8(0)).tobytes() for k in range(3)
+        ),
         "idx": _planes(_zigzag_delta(flat, 8 * ib)),
     }
 
@@ -778,8 +790,16 @@ def unpack_tile(packed: dict) -> dict:
     """Packed tile → ``tile_mesh`` tile (with the packed vertex order)."""
     nv, nf, ib = int(packed["nv"]), int(packed["nf"]), int(packed["ib"])
     pb, cb = packed["pos"], packed["col"]
-    q = np.stack([_unzigzag_cumsum(_unplanes(pb, 2 * nv * k, nv, 2), 16) for k in range(3)], 1)
-    c = np.stack([np.cumsum(np.frombuffer(cb, np.uint8, nv, nv * k).astype(np.int64)) & 255 for k in range(3)], 1)
+    q = np.stack(
+        [_unzigzag_cumsum(_unplanes(pb, 2 * nv * k, nv, 2), 16) for k in range(3)], 1
+    )
+    c = np.stack(
+        [
+            np.cumsum(np.frombuffer(cb, np.uint8, nv, nv * k).astype(np.int64)) & 255
+            for k in range(3)
+        ],
+        1,
+    )
     idx = _unzigzag_cumsum(_unplanes(packed["idx"], 0, 3 * nf, ib), 8 * ib)
     return {
         "key": packed["key"],

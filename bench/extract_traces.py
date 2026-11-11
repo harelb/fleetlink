@@ -46,7 +46,11 @@ def read_frames(bag: str, seconds: float, rgb_topic: str, depth_topic: str):
         else:
             if m.encoding == "32FC1":
                 d = np.frombuffer(m.data, np.float32).reshape(m.height, m.width)
-                d = np.nan_to_num(d * 1000.0, nan=0.0, posinf=0.0).clip(0, 65535).astype(np.uint16)
+                d = (
+                    np.nan_to_num(d * 1000.0, nan=0.0, posinf=0.0)
+                    .clip(0, 65535)
+                    .astype(np.uint16)
+                )
             else:
                 d = np.frombuffer(m.data, np.uint16).reshape(m.height, m.width)
             depth.append(((t - t0) * 1e-9, d))
@@ -54,7 +58,12 @@ def read_frames(bag: str, seconds: float, rgb_topic: str, depth_topic: str):
 
 
 def store_sizes(rgb, depth, kf_hz: float):
-    from fleetlink.image_transfer import FAST_JPEG_QUALITY, delta_zstd_encode, downscale_depth, encode_jpeg
+    from fleetlink.image_transfer import (
+        FAST_JPEG_QUALITY,
+        delta_zstd_encode,
+        downscale_depth,
+        encode_jpeg,
+    )
 
     out, next_t, di = [], 0.0, 0
     for t, img in rgb:
@@ -65,12 +74,14 @@ def store_sizes(rgb, depth, kf_hz: float):
             di += 1
         j = len(encode_jpeg(img, FAST_JPEG_QUALITY))
         d = len(delta_zstd_encode(downscale_depth(depth[di][1], 2))) if depth else 0
-        out.append({"t": round(t, 3), "rgb": j, "depth": d, "blob": j + d + 600})  # +header
+        out.append(
+            {"t": round(t, 3), "rgb": j, "depth": d, "blob": j + d + 600}
+        )  # +header
     return out
 
 
 def video_sizes(rgb, fps: float, kbps: int, width: int):
-    from fleetlink.video import FFMPEG, AnnexBSplitter, out_size, ffmpeg_args, scale
+    from fleetlink.video import FFMPEG, AnnexBSplitter, ffmpeg_args, out_size, scale
 
     h0, w0 = rgb[0][1].shape[:2]
     w, h = out_size(w0, h0, width)
@@ -98,14 +109,22 @@ def main(argv=None):
     a = ap.parse_args(argv)
     t = time.time()
     rgb, depth = read_frames(a.bag, a.seconds, a.rgb, a.depth)
-    print(f"read {len(rgb)} rgb, {len(depth)} depth ({rgb[0][1].shape}) in {time.time() - t:.0f}s", file=sys.stderr)
+    print(
+        f"read {len(rgb)} rgb, {len(depth)} depth ({rgb[0][1].shape}) in {time.time() - t:.0f}s",
+        file=sys.stderr,
+    )
     traces = {
-        "source": a.bag, "seconds": a.seconds, "rgb_shape": list(rgb[0][1].shape),
+        "source": a.bag,
+        "seconds": a.seconds,
+        "rgb_shape": list(rgb[0][1].shape),
         "store": store_sizes(rgb, depth, kf_hz=1.4),
         "video": {
             name: video_sizes(rgb, fps, kbps, w)
             for name, (fps, kbps, w) in {
-                "low": (10, 150, 480), "med": (15, 400, 640), "high": (15, 1000, 640), "tab": (5, 300, 640),
+                "low": (10, 150, 480),
+                "med": (15, 400, 640),
+                "high": (15, 1000, 640),
+                "tab": (5, 300, 640),
             }.items()
         },
     }

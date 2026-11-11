@@ -123,7 +123,11 @@ class RelocTracker:
             "jumps": self.n_jumps,
             "last_jump": None
             if last_jump is None
-            else {"dxy": last_jump["dxy"], "dyaw": last_jump["dyaw"], "age_s": age(last_jump["t"])},
+            else {
+                "dxy": last_jump["dxy"],
+                "dyaw": last_jump["dyaw"],
+                "age_s": age(last_jump["t"]),
+            },
             "recent_jumps": [
                 {"dxy": j["dxy"], "dyaw": j["dyaw"], "age_s": age(j["t"])}
                 for j in reversed(self.jumps)

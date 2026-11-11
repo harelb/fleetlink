@@ -1,7 +1,7 @@
 """C6 live image-store mirror: robot store -> fleetlink -> base store (API.md §13).
 
-Exercises the real hydra_image_store writer and the fleetlink.image_transfer
-codec (skipped without hydra_image_store): resume across agent and console
+Exercises the real hydra_python.image_store writer and the fleetlink.image_transfer
+codec (skipped without hydra_python.image_store): resume across agent and console
 restarts with nothing lost or duplicated, gap repair on a lossy link, store
 rotation (new Hydra session), and that the mirrored store loads with
 agentic_navigation's SAM3 keyframe loader.
@@ -14,22 +14,30 @@ import sys
 import numpy as np
 import pytest
 
-pytest.importorskip("hydra_image_store")
+pytest.importorskip("hydra_python.image_store")
 pytest.importorskip("zstandard")
 cv2 = pytest.importorskip("cv2")
-from hydra_image_store import FrameKind, ImageStore, make_node_id  # noqa: E402
+from hydra_python.image_store import FrameKind, ImageStore, make_node_id  # noqa: E402
 
-from fleetlink import codec  # noqa: E402
+from fleetlink import codec, store_mirror  # noqa: E402
 from fleetlink.agent import AgentCore  # noqa: E402
 from fleetlink.receiver import Receiver  # noqa: E402
 from fleetlink.store_mirror import StoreMirror, StoreTail  # noqa: E402
 from fleetlink.transport import LinkEmulator, VirtualClock  # noqa: E402
 
 AGENTIC_NAV = pathlib.Path(
-    os.environ.get("AGENTIC_NAV_SRC", "../agentic_navigation")
+    os.environ.get(
+        "AGENTIC_NAV_SRC",
+        pathlib.Path(__file__).resolve().parents[2] / "agentic_navigation",
+    )
 )
 
 W, H = 64, 48
+
+# the agent mirrors only with the store's tail (live) mode, Hydra PR #221
+needs_tail = pytest.mark.skipif(
+    not store_mirror.tail_mode_available(), reason=store_mirror.TAIL_MODE_MISSING
+)
 
 
 class RobotStore:
@@ -69,8 +77,15 @@ class RobotStore:
                     aTb[0, 3] = 0.3
             ids.append(
                 self.w.add_frame_ref(
-                    self.sensor, self.ts, kind=kind, world_T_body_odom=pose,
-                    rgb=rp, depth=dp, link="copy", anchor_node_id=anchor, anchor_T_body=aTb,
+                    self.sensor,
+                    self.ts,
+                    kind=kind,
+                    world_T_body_odom=pose,
+                    rgb=rp,
+                    depth=dp,
+                    link="copy",
+                    anchor_node_id=anchor,
+                    anchor_T_body=aTb,
                 )  # fmt: skip
             )
         return ids
@@ -81,7 +96,9 @@ class RobotStore:
 
 def _pair(tmp_path, link_kw=None, store_cfg=None, clock=None, agent=None):
     clock = clock or VirtualClock()
-    link = LinkEmulator(clock=clock, **(link_kw or {"bandwidth": None, "latency": 0.01}))
+    link = LinkEmulator(
+        clock=clock, **(link_kw or {"bandwidth": None, "latency": 0.01})
+    )
     cfg = {
         "store_path": str(tmp_path / "robot" / "image_store"),
         "store_poll_s": 0.2,
@@ -113,6 +130,7 @@ def _mirror_ids(rx) -> list[int]:
         return [f.frame_id for f in s.frames()]
 
 
+@needs_tail
 def test_mirror_keyframes_and_resume_across_restarts(tmp_path):
     robot = RobotStore(tmp_path / "robot" / "image_store")
     kf = robot.add(5)
@@ -150,6 +168,7 @@ def test_mirror_keyframes_and_resume_across_restarts(tmp_path):
     robot.close()
 
 
+@needs_tail
 def test_mirror_store_loads_with_sam3_keyframe_loader(tmp_path):
     if not (AGENTIC_NAV / "agentic_navigation").is_dir():
         pytest.skip("agentic_navigation checkout not found")
@@ -178,6 +197,7 @@ def test_mirror_store_loads_with_sam3_keyframe_loader(tmp_path):
     robot.close()
 
 
+@needs_tail
 def test_mirror_repairs_gaps_on_a_lossy_link(tmp_path):
     robot = RobotStore(tmp_path / "robot" / "image_store")
     kf = robot.add(12)
@@ -197,6 +217,7 @@ def test_mirror_repairs_gaps_on_a_lossy_link(tmp_path):
     robot.close()
 
 
+@needs_tail
 def test_mirror_respects_c6_budget_and_all_frames_mode(tmp_path):
     robot = RobotStore(tmp_path / "robot" / "image_store")
     ids = robot.add(3) + robot.add(3, own=False)
@@ -213,6 +234,7 @@ def test_mirror_respects_c6_budget_and_all_frames_mode(tmp_path):
     robot.close()
 
 
+@needs_tail
 def test_store_rotation_starts_a_new_mirror(tmp_path):
     root = tmp_path / "robot" / "image_store"
     robot = RobotStore(root)
@@ -268,6 +290,7 @@ def test_receiver_set_budget_accepts_c6():
     assert codec  # imported for parity with the other suites
 
 
+@needs_tail
 def test_threaded_mirror_writes_on_worker(tmp_path):
     robot = RobotStore(tmp_path / "robot" / "image_store")
     kf = robot.add(3)
@@ -278,7 +301,9 @@ def test_threaded_mirror_writes_on_worker(tmp_path):
         {"store_path": str(tmp_path / "robot" / "image_store"), "store_poll_s": 0.2, "store_send": True},
         clock=clock,
     )  # fmt: skip
-    rx = Receiver(link.base, clock=clock, threaded=False, store_root=str(tmp_path / "live"))
+    rx = Receiver(
+        link.base, clock=clock, threaded=False, store_root=str(tmp_path / "live")
+    )
     rx.start()
     _run(clock, link, core, rx, 4.0)
     rx.store.flush()
@@ -287,6 +312,7 @@ def test_threaded_mirror_writes_on_worker(tmp_path):
     robot.close()
 
 
+@needs_tail
 def test_store_send_off_by_default_and_console_switch(tmp_path):
     """Nothing goes on C6 until the base asks; off again keeps the chain, so
     turning it back on continues with no loss and no duplicates."""
@@ -325,6 +351,7 @@ def test_store_send_off_by_default_and_console_switch(tmp_path):
     robot.close()
 
 
+@needs_tail
 def test_store_send_reasked_after_agent_restart(tmp_path):
     robot = RobotStore(tmp_path / "robot" / "image_store")
     kf = robot.add(3)
@@ -359,3 +386,14 @@ def test_store_send_without_store_is_refused(tmp_path):
     assert core.store_send is False
     assert rx.link("r")["store_send"]["robot"] is None  # no store: no switch shown
     assert not rx.pending_requests()  # refused once, never re-asked
+
+
+def test_no_tail_mode_turns_the_mirror_off(tmp_path, monkeypatch):
+    """Hydra without the store's tail mode: store_path set, but no mirror, one reason."""
+    monkeypatch.setattr(store_mirror, "tail_mode_available", lambda: False)
+    clock = VirtualClock()
+    link = LinkEmulator(clock=clock, bandwidth=None, latency=0.0)
+    core = AgentCore("r", link.robot, {"store_path": str(tmp_path)}, clock=clock)
+    assert core.store is None
+    assert core.store_error == store_mirror.TAIL_MODE_MISSING
+    assert core._store_state()["enabled"] is False

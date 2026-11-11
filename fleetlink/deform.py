@@ -55,11 +55,19 @@ def parse_dgrf(path) -> dict:
             if p[0] == "VERTEX":
                 key = int(p[1])
                 verts.setdefault(chr(key >> 56), []).append(
-                    (key & ((1 << 56) - 1), int(p[2]), float(p[3]), float(p[4]), float(p[5]))
+                    (
+                        key & ((1 << 56) - 1),
+                        int(p[2]),
+                        float(p[3]),
+                        float(p[4]),
+                        float(p[5]),
+                    )
                 )
             elif p[0] == "NODE":
                 key = int(p[1])
-                nodes.setdefault(chr(key >> 56), {})[key & ((1 << 56) - 1)] = [float(x) for x in p[2:9]]
+                nodes.setdefault(chr(key >> 56), {})[key & ((1 << 56) - 1)] = [
+                    float(x) for x in p[2:9]
+                ]
     out: dict = {"nodes": nodes}
     for prefix, rows in verts.items():
         rows.sort()
@@ -73,7 +81,12 @@ def parse_dgrf(path) -> dict:
         for i, v in nodes.get(prefix, {}).items():
             if i < n:
                 pose[i] = v
-        out[prefix] = {"ctrl": ctrl, "ctrl_stamp": stamp, "pose": pose, "valid": ~np.isnan(pose[:, 0])}
+        out[prefix] = {
+            "ctrl": ctrl,
+            "ctrl_stamp": stamp,
+            "pose": pose,
+            "valid": ~np.isnan(pose[:, 0]),
+        }
     return out
 
 
@@ -82,9 +95,15 @@ def quat_to_rot(q: np.ndarray) -> np.ndarray:
     x, y, z, w = (q[..., i] for i in range(4))
     return np.stack(
         [
-            np.stack([1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)], -1),
-            np.stack([2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)], -1),
-            np.stack([2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)], -1),
+            np.stack(
+                [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)], -1
+            ),
+            np.stack(
+                [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)], -1
+            ),
+            np.stack(
+                [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)], -1
+            ),
         ],
         -2,
     )
@@ -129,7 +148,17 @@ def windows(vstamps, ctrl_stamp, valid, k: int, tol_ns: int, order):
     return lo_out, hi_out, kk_out
 
 
-def deform(points, vstamps, ctrl, ctrl_stamp, pose, valid, k: int = 3, tol_s: float = 15.0, indices=None):
+def deform(
+    points,
+    vstamps,
+    ctrl,
+    ctrl_stamp,
+    pose,
+    valid,
+    k: int = 3,
+    tol_s: float = 15.0,
+    indices=None,
+):
     """Deform ``points`` (float32[M,3], the odometric vertices) like PGMO.
 
     ``pose``: float64[N,7] optimized control-point values (x y z qx qy qz qw),
@@ -145,7 +174,9 @@ def deform(points, vstamps, ctrl, ctrl_stamp, pose, valid, k: int = 3, tol_s: fl
         return out
     lo, hi, kk = windows(vstamps, ctrl_stamp, valid, k, int(round(tol_s * NS)), order)
     R = quat_to_rot(np.nan_to_num(pose[:, 3:7]))
-    t_minus = np.nan_to_num(pose[:, :3]) - np.einsum("nij,nj->ni", R, ctrl)  # t_j - R_j c_j
+    t_minus = np.nan_to_num(pose[:, :3]) - np.einsum(
+        "nij,nj->ni", R, ctrl
+    )  # t_j - R_j c_j
     qc = np.nan_to_num(pose[:, 3:7])
     ctrl32 = ctrl.astype(np.float32)
     # consecutive vertices with the same window share one KD-tree
@@ -164,14 +195,18 @@ def deform(points, vstamps, ctrl, ctrl_stamp, pose, valid, k: int = 3, tol_s: fl
         nn = cand[nn.reshape(len(vi), nq)]
         d_max = d[:, -1:]
         const = (d[:, :1] == d_max) | (d_max == 0)
-        w = np.where(const, 1.0, 1.0 - d[:, :-1] / np.where(d_max == 0, 1, d_max))  # (G, nq-1)
+        w = np.where(
+            const, 1.0, 1.0 - d[:, :-1] / np.where(d_max == 0, 1, d_max)
+        )  # (G, nq-1)
         use = nn[:, :-1]
         ws = w.sum(1, keepdims=True)
         q = (w[..., None] * qc[use]).sum(1) / ws
         q /= np.linalg.norm(q, axis=1, keepdims=True)
         t = (w[..., None] * t_minus[use]).sum(1) / ws
         Rq = quat_to_rot(q)
-        out[vi] = (np.einsum("gij,gj->gi", Rq, points[vi].astype(np.float64)) + t).astype(np.float32)
+        out[vi] = (
+            np.einsum("gij,gj->gi", Rq, points[vi].astype(np.float64)) + t
+        ).astype(np.float32)
     return out
 
 
@@ -185,7 +220,9 @@ POS_QUANT = 1e-3  # m
 ROT_QUANT = 1.0 / 32767.0
 
 
-def pack_poses(pose: np.ndarray, valid: np.ndarray, ref: np.ndarray | None = None) -> bytes:
+def pack_poses(
+    pose: np.ndarray, valid: np.ndarray, ref: np.ndarray | None = None
+) -> bytes:
     """Optimized control-point poses for one loop closure → compact bytes.
 
     Translations as int32 mm *relative to the original control point* (``ref``,
@@ -214,7 +251,9 @@ def unpack_poses(data: bytes, ref: np.ndarray | None = None):
     n, wide = np.frombuffer(raw[:8], np.uint32)
     o = 8
     nb = (int(n) + 7) // 8
-    valid = np.unpackbits(np.frombuffer(raw[o : o + nb], np.uint8))[: int(n)].astype(bool)
+    valid = np.unpackbits(np.frombuffer(raw[o : o + nb], np.uint8))[: int(n)].astype(
+        bool
+    )
     o += nb
     tdt = np.int32 if wide else np.int16
     sz = int(n) * 3 * np.dtype(tdt).itemsize

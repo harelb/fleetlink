@@ -64,7 +64,10 @@ def main():
         )
 
     def nodes(_cmd):
-        emit(ev="nodes", nodes=[[n, ns] for n, ns in node.get_node_names_and_namespaces()])
+        emit(
+            ev="nodes",
+            nodes=[[n, ns] for n, ns in node.get_node_names_and_namespaces()],
+        )
 
     handlers["nodes"] = nodes
 
@@ -139,7 +142,10 @@ def _robot(node, args, handlers, reliable):
             timer = node.create_timer(args.exec_delay, finish)
 
         node.create_subscription(
-            ActionSequenceMsg, f"/{r}/omniplanner_node/compiled_plan_out", on_plan, reliable(1)
+            ActionSequenceMsg,
+            f"/{r}/omniplanner_node/compiled_plan_out",
+            on_plan,
+            reliable(1),
         )
     except ImportError:
         emit(ev="warn", err="robot_executor_msgs unavailable")
@@ -170,7 +176,12 @@ def _robot(node, args, handlers, reliable):
             def done(f):
                 try:
                     res = f.result()
-                    emit(ev="hold_reply", robot=r, ok=bool(res.success), dt=time.time() - t0)
+                    emit(
+                        ev="hold_reply",
+                        robot=r,
+                        ok=bool(res.success),
+                        dt=time.time() - t0,
+                    )
                 except Exception as exc:  # noqa: BLE001
                     emit(ev="hold_reply", robot=r, ok=False, err=str(exc))
 
@@ -181,7 +192,9 @@ def _robot(node, args, handlers, reliable):
         emit(ev="warn", err="heracles_ros_interfaces unavailable")
 
     grid = {"timer": None}
-    grid_pub = node.create_publisher(OccupancyGrid, f"/{r}/hydra/tsdf/occupancy", reliable(1))
+    grid_pub = node.create_publisher(
+        OccupancyGrid, f"/{r}/hydra/tsdf/occupancy", reliable(1)
+    )
     rng = np.random.default_rng(0)
 
     def grid_load(cmd):
@@ -211,7 +224,9 @@ def _robot(node, args, handlers, reliable):
     from sensor_msgs.msg import Image
 
     cam = {"timer": None}
-    cam_pub = node.create_publisher(Image, f"/{r}/{r}_zed/rgb/image_rect_color", reliable(1))
+    cam_pub = node.create_publisher(
+        Image, f"/{r}/{r}_zed/rgb/image_rect_color", reliable(1)
+    )
 
     def camera_load(cmd):
         """Publish a random rgb8 frame (barely compressible) every ``period`` s."""
@@ -234,9 +249,13 @@ def _robot(node, args, handlers, reliable):
         cam["timer"] = node.create_timer(float(cmd.get("period", 1.0)), pub)
 
     handlers["camera"] = camera_load
-    handlers["grid_count"] = lambda _c: emit(ev="grid_count", n=grid.get("n", 0), subs=grid_pub.get_subscription_count())
+    handlers["grid_count"] = lambda _c: emit(
+        ev="grid_count", n=grid.get("n", 0), subs=grid_pub.get_subscription_count()
+    )
     handlers["exec_delay"] = lambda c: setattr(args, "exec_delay", float(c["s"]))
-    handlers["receipts"] = lambda _c: emit(ev="receipts", robot=r, receipts=dict(receipts))
+    handlers["receipts"] = lambda _c: emit(
+        ev="receipts", robot=r, receipts=dict(receipts)
+    )
 
 
 def _base(node, args, handlers, reliable):
@@ -251,24 +270,34 @@ def _base(node, args, handlers, reliable):
 
         for r in robots:
             plan_pubs[r] = node.create_publisher(
-                ActionSequenceMsg, f"/{r}/omniplanner_node/compiled_plan_out", reliable(1)
+                ActionSequenceMsg,
+                f"/{r}/omniplanner_node/compiled_plan_out",
+                reliable(1),
             )
             node.create_subscription(
                 ActionResultMsg,
                 f"/{r}/spot_executor_node/action_result",
-                lambda m, r=r: emit(ev="result", robot=r, plan_id=m.plan_id, status=m.status),
+                lambda m, r=r: emit(
+                    ev="result", robot=r, plan_id=m.plan_id, status=m.status
+                ),
                 reliable(10),
             )
 
         def plan(cmd):
             r = cmd["robot"]
             pub = plan_pubs[r]
-            emit(ev="plan_sent", robot=r, plan_id=cmd["plan_id"], subs=pub.get_subscription_count())
+            emit(
+                ev="plan_sent",
+                robot=r,
+                plan_id=cmd["plan_id"],
+                subs=pub.get_subscription_count(),
+            )
             pub.publish(ActionSequenceMsg(plan_id=cmd["plan_id"], robot_name=r))
 
         handlers["plan"] = plan
         handlers["plan_subs"] = lambda _c: emit(
-            ev="plan_subs", subs={r: p.get_subscription_count() for r, p in plan_pubs.items()}
+            ev="plan_subs",
+            subs={r: p.get_subscription_count() for r, p in plan_pubs.items()},
         )
     except ImportError:
         emit(ev="warn", err="robot_executor_msgs unavailable")
@@ -296,7 +325,9 @@ def _base(node, args, handlers, reliable):
             resp.success = True
             return resp
 
-        node.create_service(UpdateHoldingState, f"/{args.base}/update_holding_state", serve)
+        node.create_service(
+            UpdateHoldingState, f"/{args.base}/update_holding_state", serve
+        )
     except ImportError:
         emit(ev="warn", err="heracles_ros_interfaces unavailable")
 

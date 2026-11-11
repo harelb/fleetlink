@@ -9,7 +9,9 @@ cv2 = pytest.importorskip("cv2")
 
 
 def _jpeg(rgb: np.ndarray) -> bytes:
-    ok, buf = cv2.imencode(".jpg", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 95])
+    ok, buf = cv2.imencode(
+        ".jpg", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 95]
+    )
     assert ok
     return buf.tobytes()
 
@@ -30,7 +32,15 @@ def test_jpeg_frame_decodes_to_rgb():
 
 def test_camera_reply_reports_decoded_size():
     rgb = np.full((48, 64, 3), 90, np.uint8)
-    frame = {"encoding": "jpeg", "width": 0, "height": 0, "step": 0, "data": _jpeg(rgb), "stamp": 1.0, "rx_t": 1.0}
+    frame = {
+        "encoding": "jpeg",
+        "width": 0,
+        "height": 0,
+        "step": 0,
+        "data": _jpeg(rgb),
+        "stamp": 1.0,
+        "rx_t": 1.0,
+    }
     reply = media.camera_reply(frame, max_w=32, quality=80, now=2.0)
     assert (reply["src_width"], reply["src_height"]) == (64, 48)
     assert (reply["width"], reply["height"]) == (32, 24)

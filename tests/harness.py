@@ -99,7 +99,9 @@ class Proc:
     def start(self) -> "Proc":
         self.starts += 1
         log = open(self.log_path, "ab")
-        log.write(f"\n=== start #{self.starts} {time.strftime('%T')}: {self.cmd}\n".encode())
+        log.write(
+            f"\n=== start #{self.starts} {time.strftime('%T')}: {self.cmd}\n".encode()
+        )
         log.flush()
         self.proc = subprocess.Popen(
             self.cmd,
@@ -279,7 +281,9 @@ class FaultProxy:
         ls.settimeout(0.2)
         self._lsock = ls
         self._running = True
-        threading.Thread(target=self._accept_loop, daemon=True, name=f"{self.name}-accept").start()
+        threading.Thread(
+            target=self._accept_loop, daemon=True, name=f"{self.name}-accept"
+        ).start()
         return self
 
     def _event(self, what: str) -> None:
@@ -376,7 +380,9 @@ class FaultProxy:
         us.settimeout(None)
         pair[1] = us
         for src, dst, d in ((cs, us, "up"), (us, cs, "down")):
-            threading.Thread(target=self._pump, args=(pair, src, dst, d), daemon=True).start()
+            threading.Thread(
+                target=self._pump, args=(pair, src, dst, d), daemon=True
+            ).start()
 
     def _take(self, direction: str, n: int) -> None:
         while True:
@@ -386,7 +392,9 @@ class FaultProxy:
             b = self._buckets[direction]
             with b.lock:
                 now = time.monotonic()
-                b.tokens = min(rate * 0.1, b.tokens + (now - b.t) * rate)  # 100 ms burst
+                b.tokens = min(
+                    rate * 0.1, b.tokens + (now - b.t) * rate
+                )  # 100 ms burst
                 b.t = now
                 if b.tokens >= n or (b.tokens >= 0 and n > rate * 0.1):
                     b.tokens -= n
@@ -394,7 +402,9 @@ class FaultProxy:
                 need = (n - b.tokens) / rate
             time.sleep(min(need, 0.05))
 
-    def _pump(self, pair, src: socket.socket, dst: socket.socket, direction: str) -> None:
+    def _pump(
+        self, pair, src: socket.socket, dst: socket.socket, direction: str
+    ) -> None:
         alive = lambda: pair in self._conns  # noqa: E731
         try:
             while self._running and alive():
@@ -423,7 +433,9 @@ class FaultProxy:
 
 def _reset(s: socket.socket) -> None:
     try:
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, b"\x01\x00\x00\x00\x00\x00\x00\x00")
+        s.setsockopt(
+            socket.SOL_SOCKET, socket.SO_LINGER, b"\x01\x00\x00\x00\x00\x00\x00\x00"
+        )
     except OSError:
         pass
     try:
@@ -637,7 +649,9 @@ class Fleet:
             if h.wait_for(lambda e: e.get("ev") == "ready", max(1, deadline - time.time())) is None:  # fmt: skip
                 raise RuntimeError(f"{h.name} not ready:\n{h.log_text()[-3000:]}")
         for r in self.robot_names:
-            if not wait(lambda r=r: self.state_times[r], max(1, deadline - time.time())):
+            if not wait(
+                lambda r=r: self.state_times[r], max(1, deadline - time.time())
+            ):
                 raise RuntimeError(f"no C1 state from {r}:\n{self.robots[r]['agent'].log_text()[-3000:]}")  # fmt: skip
         for r in self.robot_names:
             lat = self.plan_round_trip(r, f"warm-{r}", max(1, deadline - time.time()), retry=True)  # fmt: skip
@@ -723,7 +737,9 @@ class Fleet:
         self._wait_listen(self.ports["fleetlink"], self.flrouter)
 
     def logs(self, *names: str) -> str:
-        return "\n".join(p.log_text() for p in self.procs if not names or p.name in names)
+        return "\n".join(
+            p.log_text() for p in self.procs if not names or p.name in names
+        )
 
     def dump(self, tail: int = 2500) -> str:
         out = []

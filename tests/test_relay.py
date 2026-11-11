@@ -137,7 +137,11 @@ def test_real_relay_yaml_phoenix_rows():
         spot_tw = spot.topics["/euclid/spot_executor_node/cmd_vel"]
         assert tw.type == "geometry_msgs/msg/TwistStamped" and tw.dir == "down"
         assert (tw.mode, tw.cls, tw.ttl_s, tw.ttl_strict, tw.replay_on_resync) == (
-            spot_tw.mode, spot_tw.cls, 0.5, True, False
+            spot_tw.mode,
+            spot_tw.cls,
+            0.5,
+            True,
+            False,
         )
         mm = phx.topics["/gauss/manual_mode"]
         assert mm.dir == "up" and mm.type == "std_msgs/msg/Bool" and mm.mode == "latest"
@@ -652,3 +656,45 @@ def test_stale_latest_value_dropped_on_sender():
     pr.run(3.0)
     assert pr.data("robot", "/euclid/cmd_vel") == [b"go"]
     assert pr.base.status()["topics"]["/euclid/cmd_vel"]["expired"] == 1
+
+
+def test_unavailable_message_types_are_dropped_not_fatal():
+    """A machine whose message packages lack a relayed type (an older
+    robot_executor_msgs) relays the rest; the config hash is unchanged."""
+    from fleetlink.relay_ros import drop_unavailable_types
+
+    cfg = RelayConfig(
+        {
+            "topics": [
+                {
+                    "topic": "/a",
+                    "type": "std_msgs/msg/String",
+                    "dir": "up",
+                    "mode": "reliable",
+                },
+                {
+                    "topic": "/b",
+                    "type": "no_such_pkg/msg/Nope",
+                    "dir": "up",
+                    "mode": "reliable",
+                },
+                {
+                    "topic": "/c",
+                    "type": "std_msgs/msg/NoSuchType",
+                    "dir": "up",
+                    "mode": "reliable",
+                },
+            ],
+            "services": [
+                {"service": "/s", "type": "std_srvs/srv/Trigger", "dir": "down"},
+                {"service": "/t", "type": "no_such_pkg/srv/Nope", "dir": "down"},
+            ],
+        }
+    )
+    h = cfg.hash
+    pytest.importorskip("std_msgs.msg")
+    logged = []
+    dropped = drop_unavailable_types(cfg, logged.append)
+    assert [t["topic"] for t in cfg.topics] == ["/a"]
+    assert [s["service"] for s in cfg.services] == ["/s"]
+    assert len(dropped) == 3 and logged and cfg.hash == h

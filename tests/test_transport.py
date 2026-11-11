@@ -281,11 +281,16 @@ def test_shared_channel_splits_airtime_between_links():
     from fleetlink.transport import LinkEmulator, SharedChannel, VirtualClock
 
     clock = VirtualClock()
-    links = [LinkEmulator(clock, bandwidth=10_000.0, latency=0.01, loss=0.0, seed=i) for i in range(2)]
+    links = [
+        LinkEmulator(clock, bandwidth=10_000.0, latency=0.01, loss=0.0, seed=i)
+        for i in range(2)
+    ]
     ch = SharedChannel(links, clock, airtime=[1.0, 2.0])
     got = {0: 0, 1: 0}
     for i, lk in enumerate(links):
-        lk.base.subscribe("k/**", lambda key, data, i=i: got.__setitem__(i, got[i] + len(data)))
+        lk.base.subscribe(
+            "k/**", lambda key, data, i=i: got.__setitem__(i, got[i] + len(data))
+        )
     for _ in range(40):  # far more than the channel carries in 2 s
         for lk in links:
             lk.robot.put("k/a", b"x" * 1000, "C3")

@@ -372,6 +372,12 @@ class AgentCore:
         self._t_store = -1e9
         self.store_send = bool(self.cfg.get("store_send"))
         if self.cfg.get("store_path"):
+            from fleetlink import store_mirror
+
+            if not store_mirror.tail_mode_available():
+                # logged once by AgentNode ("store mirror disabled: ...")
+                self.store_error = store_mirror.TAIL_MODE_MISSING
+        if self.cfg.get("store_path") and self.store_error is None:
             try:
                 from fleetlink.store_mirror import StoreTail
 
@@ -381,11 +387,13 @@ class AgentCore:
                     self.cfg["store_compression"],
                     clock=clock,
                 )
-            except Exception as exc:  # noqa: BLE001  (bad params / no hydra_image_store)
+            except Exception as exc:  # noqa: BLE001  (bad params)
                 self.store_error = f"{type(exc).__name__}: {exc}"
         # C3 lidar (fleetlink.pointcloud_codec frames from AgentNode)
         self.lidar_topic = self.cfg.get("lidar_topic") or None
-        self.lidar_enabled = bool(self.cfg.get("lidar")) and self.lidar_topic is not None
+        self.lidar_enabled = (
+            bool(self.cfg.get("lidar")) and self.lidar_topic is not None
+        )
         self.lidar_error: str | None = None
         self._lidar: dict | None = None  # newest encoded frame (+ frame, origin, stamp)
         self._lidar_rx_t: float | None = None
@@ -452,7 +460,9 @@ class AgentCore:
                 return
             self.odom = None
             self.mesh_fallback = reason
-            self._tile = lambda m: codec.tile_mesh(m[0], m[1], m[2], self.cfg["tile_size"])
+            self._tile = lambda m: codec.tile_mesh(
+                m[0], m[1], m[2], self.cfg["tile_size"]
+            )
             self._mesh = None  # the next DSG brings the deformed mesh
 
     def _refresh_odom_mesh(self) -> None:
@@ -496,7 +506,11 @@ class AgentCore:
         """Phoenix: the latest omniplanner Path (``points`` (N, 3) in ``frame``,
         ideally the pose frame) and its header stamp, which names the plan."""
         pts = np.asarray(points, dtype=float).reshape(-1, 3)
-        length = float(np.hypot(*np.diff(pts[:, :2], axis=0).T).sum()) if len(pts) > 1 else 0.0
+        length = (
+            float(np.hypot(*np.diff(pts[:, :2], axis=0).T).sum())
+            if len(pts) > 1
+            else 0.0
+        )
         with self._lock:
             plan_id = f"{int(sec)}.{int(nanosec):09d}"
             if self._plan is not None and self._plan["plan_id"] == plan_id:
@@ -734,7 +748,9 @@ class AgentCore:
         if op == "mesh_lod":
             level = str(args.get("level") or "")
             if level not in codec.MESH_LODS:
-                raise ValueError(f"unknown mesh LOD {level!r} (one of {codec.MESH_LODS})")
+                raise ValueError(
+                    f"unknown mesh LOD {level!r} (one of {codec.MESH_LODS})"
+                )
             keys = args.get("tiles")
             if keys:  # just these tiles; the default stays
                 for k in keys:
@@ -768,7 +784,9 @@ class AgentCore:
             return res
         if op == "store_send":
             if self.store is None:
-                raise ValueError(self.store_error or "store mirror disabled (no store_path)")
+                raise ValueError(
+                    self.store_error or "store mirror disabled (no store_path)"
+                )
             enable = bool(args.get("enable", True))
             if self.store_send and not enable:
                 # drop what is queued and step the cursor back to the last frame
@@ -917,12 +935,18 @@ class AgentCore:
                 self._tiles_by_lod = {}
                 self._tiled_version = self._mesh_version
             self._lod_dirty = False
-            levels = {self._lod_of(k) for k in self.mesh_lod_tiles} | {self.mesh_lod or "full"}
+            levels = {self._lod_of(k) for k in self.mesh_lod_tiles} | {
+                self.mesh_lod or "full"
+            }
             by_lod = {lv: self._lod_tiles(lv) for lv in levels}
             default = by_lod[self.mesh_lod or "full"]
-            keys = set(default) | {k for k in self.mesh_lod_tiles if k in by_lod[self._lod_of(k)]}
+            keys = set(default) | {
+                k for k in self.mesh_lod_tiles if k in by_lod[self._lod_of(k)]
+            }
             self.tiles = {
-                k: by_lod[self._lod_of(k)][k] for k in keys if k in by_lod[self._lod_of(k)]
+                k: by_lod[self._lod_of(k)][k]
+                for k in keys
+                if k in by_lod[self._lod_of(k)]
             }
             for k in [k for k in self.sent_manifest if k not in self.tiles]:
                 del self.sent_manifest[k]
@@ -942,7 +966,9 @@ class AgentCore:
                 )
             )
         # re-queue tiles only; the manifest and a pending occupancy grid stay
-        self.sched.clear("C3", lambda it: it.tag not in ("manifest", "grid", "values", "lidar"))
+        self.sched.clear(
+            "C3", lambda it: it.tag not in ("manifest", "grid", "values", "lidar")
+        )
         for k in changed:
             tile = self.tiles[k]
 
@@ -1189,8 +1215,11 @@ class AgentCore:
             "nodes": len(self._target[0]) if self._target else 0,
             "tiles": len(self.tiles),
             "mesh_lod": self.mesh_lod,
-            "mesh": {"source": "odometric" if self.odom is not None else "dsg",
-                     "configured": self.cfg["mesh_source"], "fallback": self.mesh_fallback},  # fmt: skip
+            "mesh": {
+                "source": "odometric" if self.odom is not None else "dsg",
+                "configured": self.cfg["mesh_source"],
+                "fallback": self.mesh_fallback,
+            },  # fmt: skip
             "c2_resent": self.c2_resent,
             "dsg": {k: v for k, v in dict(self.dsg_diag).items() if k[0] != "_"},
         }
@@ -1282,7 +1311,10 @@ class AgentCore:
                 self._t_paths = now
                 self._paths_tick()
             self._lidar_tick(now)
-            if self.store is not None and now - self._t_store >= self.cfg["store_poll_s"]:
+            if (
+                self.store is not None
+                and now - self._t_store >= self.cfg["store_poll_s"]
+            ):
                 self._t_store = now
                 try:
                     self._store_tick()
@@ -1392,7 +1424,9 @@ class PhoenixGuards:
     def battery(self, percentage) -> dict:
         """sensor_msgs/BatteryState ``percentage``: 0-1 (NaN: unknown)."""
         p = float(percentage)
-        return self._set("battery_percent", round(100.0 * p, 1) if np.isfinite(p) else None)
+        return self._set(
+            "battery_percent", round(100.0 * p, 1) if np.isfinite(p) else None
+        )
 
     def estop(self, pressed) -> dict:
         return self._set("estop_pressed", bool(pressed))
@@ -1679,11 +1713,18 @@ class AgentNode:
         tick_hz = p("tick_hz", 20.0)
         cfg["mesh_period_s"] = p("mesh_period_s", float(cfg["mesh_period_s"]))
         cfg["tile_size"] = p("tile_size", float(cfg["tile_size"]))
-        cfg["mesh_decimate_cell"] = p("mesh_decimate_cell", float(cfg["mesh_decimate_cell"]))
+        cfg["mesh_decimate_cell"] = p(
+            "mesh_decimate_cell", float(cfg["mesh_decimate_cell"])
+        )
         # "dsg" | "odometric"; ADT4_FLEETLINK_MESH_SOURCE sets the default per robot
-        cfg["mesh_source"] = p("mesh_source", os.environ.get("ADT4_FLEETLINK_MESH_SOURCE") or str(cfg["mesh_source"]))
+        cfg["mesh_source"] = p(
+            "mesh_source",
+            os.environ.get("ADT4_FLEETLINK_MESH_SOURCE") or str(cfg["mesh_source"]),
+        )
         mesh_delta_topic = p("mesh_delta_topic", "hydra/frontend/full_mesh_update")
-        mesh_graph_inc_topic = p("mesh_graph_incremental_topic", "hydra/frontend/mesh_graph_incremental")
+        mesh_graph_inc_topic = p(
+            "mesh_graph_incremental_topic", "hydra/frontend/mesh_graph_incremental"
+        )
         mesh_graph_topic = p("mesh_graph_topic", "hydra/backend/mesh_graph")
         # one endpoint or a comma-separated list (zenoh keeps retrying them all)
         connect = split_endpoints(p("zenoh_connect", "tcp/127.0.0.1:7447"))
@@ -1720,14 +1761,12 @@ class AgentNode:
         cfg["store_path"] = p("store_path", default_store) or None
         cfg["store_send"] = p("store_send", bool(cfg["store_send"]))
         cfg["store_frames"] = p("store_frames", str(cfg["store_frames"]))
-        cfg["store_compression"] = p(
-            "store_compression", str(cfg["store_compression"])
-        )
+        cfg["store_compression"] = p("store_compression", str(cfg["store_compression"]))
         cfg["budgets"]["C6"] = p("budget_C6", int(cfg["budgets"]["C6"]))
         # C3 lidar stream (off until the console asks): "" = no lidar
-        cfg["lidar_topic"] = p(
-            "lidar_topic", f"/{robot}/ouster/points" if phoenix else ""
-        ) or None
+        cfg["lidar_topic"] = (
+            p("lidar_topic", f"/{robot}/ouster/points" if phoenix else "") or None
+        )
         cfg["lidar_hz"] = p("lidar_hz", float(cfg["lidar_hz"]))
         cfg["lidar_bps"] = p("lidar_bps", int(cfg["lidar_bps"]))
         cfg["lidar_intensity"] = p("lidar_intensity", bool(cfg["lidar_intensity"]))
@@ -1777,7 +1816,9 @@ class AgentNode:
 
         nd.create_subscription(DsgUpdate, dsg_topic, self._on_dsg, QoSProfile(depth=1))
         if self.core.odom is not None:
-            self._subscribe_odom_mesh(mesh_delta_topic, mesh_graph_inc_topic, mesh_graph_topic)
+            self._subscribe_odom_mesh(
+                mesh_delta_topic, mesh_graph_inc_topic, mesh_graph_topic
+            )
         # best-effort subscribers match both reliable and best-effort publishers
         from rclpy.qos import qos_profile_sensor_data
 
@@ -1880,9 +1921,7 @@ class AgentNode:
         self.relay = None
         relay_config = p("relay_config", "")
         if relay_config:
-            self.relay = self._start_relay(
-                robot, relay_config, self.platform, topology
-            )
+            self.relay = self._start_relay(robot, relay_config, self.platform, topology)
 
         self._decoder = threading.Thread(target=self._decode_loop, daemon=True)
         self._decoder.start()
@@ -1933,7 +1972,10 @@ class AgentNode:
             from std_msgs.msg import Bool
 
             nd.create_subscription(
-                BatteryState, topics["battery"], lambda m: guards(g.battery(m.percentage)), qos
+                BatteryState,
+                topics["battery"],
+                lambda m: guards(g.battery(m.percentage)),
+                qos,
             )
             for key, fn in (("estop", g.estop), ("safety_stop", g.safety_stop),
                             ("manual_mode", g.manual_mode)):  # fmt: skip
@@ -2119,7 +2161,9 @@ class AgentNode:
                 if seq <= 1 and int(msg.prev_active_vertices) == 0:
                     self.core.reset_odom_mesh()  # Hydra restarted
                 else:
-                    self.core.fallback_to_dsg_mesh(f"mesh delta gap {self._delta_seq} -> {seq}")
+                    self.core.fallback_to_dsg_mesh(
+                        f"mesh delta gap {self._delta_seq} -> {seq}"
+                    )
                     return
             self._delta_seq = seq
             try:
@@ -2129,10 +2173,16 @@ class AgentNode:
 
         self.node.create_subscription(MeshDelta, delta_topic, on_delta, latched)
         self.node.create_subscription(
-            PoseGraph, inc_topic, lambda m: self.core.on_mesh_graph_incremental(nodes_from_pose_graph(m)), latched
+            PoseGraph,
+            inc_topic,
+            lambda m: self.core.on_mesh_graph_incremental(nodes_from_pose_graph(m)),
+            latched,
         )
         self.node.create_subscription(
-            PoseGraph, graph_topic, lambda m: self.core.on_mesh_graph(nodes_from_pose_graph(m)), QoSProfile(depth=1)
+            PoseGraph,
+            graph_topic,
+            lambda m: self.core.on_mesh_graph(nodes_from_pose_graph(m)),
+            QoSProfile(depth=1),
         )
         self.log.info(f"mesh: odometric ({delta_topic}, {inc_topic}, {graph_topic})")
 

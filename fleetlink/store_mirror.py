@@ -1,11 +1,12 @@
 """Live image-store mirror over fleetlink (class C6, API.md §13).
 
 Robot side, :class:`StoreTail`: tails the robot's image store (sqlite, WAL,
-opened read-only and never indexed from here).  Hydra/Khronos no longer write
-it: ``hydra-image-store tail`` (the hydra window's ``image-store-tail``) builds
-it from the keyframe zips, track logs and event logs while Hydra runs, already
+opened read-only and never indexed from here).  Hydra/Khronos do not write it
+directly: the image store's tailer builds it from the keyframe zips, track logs
+and event logs while Hydra runs, already
 re-encoded (JPEG colour, 16-bit PNG depth), so no InputData zip / EXR ever goes
-on the wire.  It selects frames (``keyframes`` = the agent nodes' own keyframes,
+on the wire.  The tail mode is Hydra PR #221 and is not on Hydra ``develop``:
+without it (:func:`tail_mode_available`) the agent turns the mirror off.  It selects frames (``keyframes`` = the agent nodes' own keyframes,
 what SAM3 search uses, plus the frames of kept object observations; or ``all``,
 which adds the other keyframes) in ``frame_id`` order
 and encodes each with :func:`fleetlink.image_transfer.encode_frame` (``none`` |
@@ -66,7 +67,7 @@ COMPRESSION_MODES = ("none", "lossless", "fast")
 
 
 def _transfer():
-    # lazy: image_transfer needs hydra_image_store, which the agent may lack
+    # lazy: image_transfer needs hydra_python.image_store, which the agent may lack
     from fleetlink import image_transfer
 
     return image_transfer
@@ -90,12 +91,29 @@ def store_id_of(
     return h.hexdigest()[:12]
 
 
+TAIL_MODE_MISSING = (
+    "hydra_python.image_store has no tail (live) mode (Hydra PR #221, not on "
+    "Hydra develop); live image-store mirroring is off"
+)
+
+
+def tail_mode_available() -> bool:
+    """Whether ``hydra_python.image_store`` can follow a store while Hydra writes
+    its logs (the tail mode). Without it no store exists during a run, so there is
+    nothing to mirror."""
+    try:
+        from hydra_python.image_store.indexer import tail_state  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 def tail_session(store_dir: str | os.PathLike) -> tuple[bool, int | None]:
     """``(tailed, session)`` of a store from its tailer status (meta
     ``indexer.tail``); ``(False, None)`` for a store nobody tails."""
     try:
-        from hydra_image_store.indexer import tail_state
-    except ImportError:  # hydra_image_store before the tail mode
+        from hydra_python.image_store.indexer import tail_state
+    except ImportError:  # no tail mode (see tail_mode_available)
         return False, None
     state = tail_state(store_dir)
     if not state:
@@ -104,8 +122,13 @@ def tail_session(store_dir: str | os.PathLike) -> tuple[bool, int | None]:
     # with the first merge, minutes later, and indexer.tail.session (the newest open of
     # any log) changes then. The frontend log's session changes only when Hydra restarts.
     events = state.get("events") or {}
-    front = [e.get("session") for e in events.values()
-             if isinstance(e, dict) and e.get("source") == "frontend" and e.get("session") is not None]
+    front = [
+        e.get("session")
+        for e in events.values()
+        if isinstance(e, dict)
+        and e.get("source") == "frontend"
+        and e.get("session") is not None
+    ]
     s = max(front) if front else state.get("session")
     return True, None if s is None else int(s)
 
@@ -177,12 +200,10 @@ class StoreTail:
             self.error = f"no image store at {self.path}"
             return None
         try:
-            from hydra_image_store import ImageStore
+            from hydra_python.image_store import ImageStore
 
-            try:  # read only: the tailer is the store's one writer
-                self._store = ImageStore.open(self.path, index=False)
-            except TypeError:  # hydra_image_store before the indexer
-                self._store = ImageStore.open(self.path)
+            # read only: the tailer is the store's one writer
+            self._store = ImageStore.open(self.path, index=False)
             self.error = None
         except Exception as exc:  # noqa: BLE001
             self.error = f"{type(exc).__name__}: {exc}"
@@ -300,7 +321,10 @@ class StoreTail:
             return True
         if unbound is None:
             unbound = {(r, k): why for r, k, why in store.unbound_tracks()}
-        if all(unbound.get((o["robot_id"], o["track_id"]), "unbound") != "unbound" for o in waiting):
+        if all(
+            unbound.get((o["robot_id"], o["track_id"]), "unbound") != "unbound"
+            for o in waiting
+        ):
             self._unbound_since.pop(frame_id, None)
             return True
         first = self._unbound_since.setdefault(frame_id, self.clock())
@@ -316,10 +340,13 @@ class StoreTail:
         sent out of the chain as ``late`` frames."""
         if self.cursor is None or n <= 0:
             return []
-        rows = [r for _db, r in store._query(
-            "SELECT obs_id, frame_id FROM observations WHERE kept != 0 AND frame_id <= ? ORDER BY obs_id",
-            (self.cursor,),
-        )]
+        rows = [
+            r
+            for _db, r in store._query(
+                "SELECT obs_id, frame_id FROM observations WHERE kept != 0 AND frame_id <= ? ORDER BY obs_id",
+                (self.cursor,),
+            )
+        ]
         out, seen = [], set()
         for obs_id, fid in rows:
             if obs_id in self._obs_sent or fid in seen or fid in self._late_pending:
@@ -383,7 +410,9 @@ class StoreTail:
             try:
                 t = _transfer()
                 obs = t.frame_observations(store, int(frame_id))
-                blob = t.encode_frame(store, int(frame_id), self.compression, observations=True)
+                blob = t.encode_frame(
+                    store, int(frame_id), self.compression, observations=True
+                )
                 self._obs_sent.update(o["obs_id"] for o in obs)
                 self._late_pending.discard(int(frame_id))
             except Exception as exc:  # noqa: BLE001
@@ -394,8 +423,19 @@ class StoreTail:
                         "blob": None, "error": self.error}  # fmt: skip
             self._avg_bytes = 0.8 * self._avg_bytes + 0.2 * len(blob)
             if prev == "late":
-                return {"id": self.id, "frame_id": int(frame_id), "prev": None, "late": True, "blob": blob}
-            return {"id": self.id, "frame_id": int(frame_id), "prev": prev, "blob": blob}
+                return {
+                    "id": self.id,
+                    "frame_id": int(frame_id),
+                    "prev": None,
+                    "late": True,
+                    "blob": blob,
+                }
+            return {
+                "id": self.id,
+                "frame_id": int(frame_id),
+                "prev": prev,
+                "blob": blob,
+            }
 
     def mark_sent(self, frame_id: int, nbytes: int, late: bool = False) -> None:
         with self._lock:
@@ -551,7 +591,7 @@ class StoreMirror:
         if not db.exists():
             return None
         try:
-            from hydra_image_store import ImageStore
+            from hydra_python.image_store import ImageStore
 
             with ImageStore.open(path, index=False) as s:
                 vals = [r[0] for _d, r in s._query("SELECT MAX(frame_id) FROM frames")]
@@ -656,7 +696,7 @@ class StoreMirror:
         try:
             t = _transfer()
             if m.writer is None:
-                from hydra_image_store import ImageStore
+                from hydra_python.image_store import ImageStore
 
                 m.path.mkdir(parents=True, exist_ok=True)
                 m.writer = ImageStore.open_writer(m.path)

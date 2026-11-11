@@ -26,8 +26,8 @@ pytestmark = pytest.mark.integration
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROUTER_BIN = os.path.join(HERE, "..", "bin", "fleetlink-router")
 ROUTER_CONFIG = os.path.join(HERE, "..", "config", "fleetlink_router.json5")
-PORT_A = 17460  # NEVER 7447
-PORT_B = 17461
+PORT_A = int(os.environ.get("FLEETLINK_ROUTER_TEST_PORT", 17460))  # NEVER 7447
+PORT_B = PORT_A + 1
 
 
 class FleetlinkRouter:

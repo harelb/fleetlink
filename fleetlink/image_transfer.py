@@ -1,8 +1,8 @@
 """Compact, self-describing encoding of hydra image-store frames for the radio.
 
-Moved here from ``hydra_image_store.transfer``; ``hydra_image_store`` stays the
-store reader/writer. Used by the prior-map transfer (:mod:`fleetlink.image_pack`,
-``python -m fleetlink.image_pack pack`` / ``unpack``) and the live store mirror
+The store reader/writer is Hydra's ``hydra_python.image_store``. Used by the prior-map
+transfer (:mod:`fleetlink.image_pack`, ``python -m fleetlink.image_pack pack`` /
+``unpack``) and the live store mirror
 (:mod:`fleetlink.store_mirror`). One frame (its row,
 calibration, RGB and depth) becomes one ``bytes`` blob::
 
@@ -52,29 +52,22 @@ from collections.abc import Iterable
 
 import numpy as np
 
-from hydra_image_store.codec import SEQ_MASK, transform_to_blob
-from hydra_image_store.store import _FRAME_COLS, Frame, ImageStore, ImageStoreWriter
-
-try:  # track ids from here up belong to writers other than Khronos (SAM3 write-back)
-    from hydra_image_store.codec import EXTERNAL_TRACK_BASE as SAM3_TRACK_BASE
-except ImportError:  # older hydra_image_store
-    SAM3_TRACK_BASE = 1 << 40
-
-try:
-    from hydra_image_store.store import frame_stem
-except ImportError:  # hydra_image_store before frame_stem()
-
-    def frame_stem(timestamp_ns: int, sensor_id: int) -> str:
-        """Hydra's C++ image file stem: ``<ts>``, or ``<ts>_s<seq>`` for sensor seq > 0."""
-        seq = int(sensor_id) & SEQ_MASK
-        return f"{int(timestamp_ns)}_s{seq}" if seq else str(int(timestamp_ns))
-
+# track ids from EXTERNAL_TRACK_BASE up belong to writers other than Khronos (SAM3 write-back)
+from hydra_python.image_store.codec import EXTERNAL_TRACK_BASE as SAM3_TRACK_BASE
+from hydra_python.image_store.codec import rle_encode, transform_to_blob
+from hydra_python.image_store.store import (
+    _FRAME_COLS,
+    Frame,
+    ImageStore,
+    ImageStoreWriter,
+    frame_stem,
+)
 
 MAGIC = b"HISF"
 VERSION = 1
 COMPRESSION_MODES = ("none", "lossless", "fast")
 FRAME_SELECTIONS = ("keyframes", "all")
-# "keyframes" = the agent nodes' own keyframes: of hydra_image_store's KEYFRAMEs (every
+# "keyframes" = the agent nodes' own keyframes: of the image store's KEYFRAMEs (every
 # keyframe archive, anchored to the agent node nearest in time) the ones taken at their
 # anchor's stamp, whose anchor_T_body is therefore the identity (what used to be kind 0
 # before the sub-keyframes, now the other keyframes, became KEYFRAMEs too). "all" adds
@@ -98,6 +91,8 @@ def register_sql_functions(store) -> None:
     on the store's sqlite connections (idempotent)."""
     for db in getattr(store, "_dbs", ()):
         db.conn.create_function("own_keyframe", 2, _own_keyframe, deterministic=True)
+
+
 FAST_JPEG_QUALITY = 75
 ZSTD_LEVEL = 3
 _HEADER = struct.Struct("<4sBI")
@@ -205,34 +200,42 @@ def decode_png16(data: bytes) -> np.ndarray:
 
 def decode_depth_mm(data: bytes) -> np.ndarray:
     """uint16 millimetre depth from a stored depth file: a 16-bit PNG (the store's own
-    format), else any image OpenCV decodes (e.g. a float32 EXR in metres, which a raw
-    Hydra InputData archive holds), converted to millimetres."""
+    format), else any float image in metres (the TIFF a raw Hydra InputData archive
+    holds, or the EXR of an older archive), converted to millimetres."""
     if _sniff(data) == "png":
         return decode_png16(data)
     arr = None
-    if data[:4] == b"\x76\x2f\x31\x01":  # OpenEXR: hydra_image_store's reader needs no env var
+    if data[:4] == b"\x76\x2f\x31\x01":  # OpenEXR (archives before Hydra's TIFF depth)
         try:
-            from hydra_image_store.exr import read_exr
+            from hydra_python.image_store.inputdata import decode_exr
 
-            arr = read_exr(data)
-        except Exception:  # noqa: BLE001  (older package / unsupported encoding: OpenCV)
+            arr = decode_exr(data)
+        except Exception:  # noqa: BLE001  (no EXR support: try OpenCV below)
             arr = None
     if arr is not None:
         arr = np.asarray(arr)
         if arr.ndim == 3:
             arr = arr[..., 0]
-        mm = np.nan_to_num(arr.astype(np.float64) * 1000.0, nan=0.0, posinf=0.0, neginf=0.0)
+        mm = np.nan_to_num(
+            arr.astype(np.float64) * 1000.0, nan=0.0, posinf=0.0, neginf=0.0
+        )
         return np.ascontiguousarray(np.clip(np.rint(mm), 0, 65535).astype(np.uint16))
     cv2 = _cv2()
     if cv2 is None:
         raise MissingDependency("decoding non-PNG depth needs opencv-python (cv2)")
-    arr = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_UNCHANGED | cv2.IMREAD_ANYDEPTH)
+    arr = cv2.imdecode(
+        np.frombuffer(data, np.uint8), cv2.IMREAD_UNCHANGED | cv2.IMREAD_ANYDEPTH
+    )
     if arr is None:
-        raise ValueError("could not decode the depth image (EXR needs OPENCV_IO_ENABLE_OPENEXR=1)")
+        raise ValueError(
+            "could not decode the depth image (EXR needs OPENCV_IO_ENABLE_OPENEXR=1)"
+        )
     if arr.ndim == 3:
         arr = arr[..., 0]
     if np.issubdtype(arr.dtype, np.floating):
-        mm = np.nan_to_num(arr.astype(np.float64) * 1000.0, nan=0.0, posinf=0.0, neginf=0.0)
+        mm = np.nan_to_num(
+            arr.astype(np.float64) * 1000.0, nan=0.0, posinf=0.0, neginf=0.0
+        )
         return np.ascontiguousarray(np.clip(np.rint(mm), 0, 65535).astype(np.uint16))
     return np.ascontiguousarray(arr.astype(np.uint16, copy=False))
 
@@ -405,8 +408,6 @@ def _mask_rle_from_png(path) -> str | None:
         arr = decode_png16(data)
     except Exception:  # noqa: BLE001
         return None
-    from hydra_image_store.codec import rle_encode
-
     return json.dumps(rle_encode(arr > 0), separators=(",", ":"))
 
 
@@ -471,7 +472,7 @@ def encode_frame(
 
     for path in (frame.rgb_path, frame.depth_path):
         if path is not None and pathlib.Path(path).suffix.lower() == ".zip":
-            # raw InputData archives are indexed (and re-encoded) by hydra_image_store;
+            # raw InputData archives are indexed (and re-encoded) by the store's indexer;
             # a store row pointing at one is a bug, never ship it
             raise ValueError(f"frame {frame.frame_id}: refusing to send archive {path}")
     rgb = _read(frame.rgb_path)

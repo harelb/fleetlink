@@ -1,5 +1,5 @@
 """fleetlink.image_transfer (HISF frame codec) and fleetlink.image_pack (prior-map
-pack/unpack); moved here from hydra_image_store.transfer / .pack."""
+pack/unpack) on stores written with Hydra's hydra_python.image_store."""
 
 import io
 import json
@@ -9,16 +9,28 @@ import tarfile
 import numpy as np
 import pytest
 
-pytest.importorskip("hydra_image_store")
-pytest.importorskip("hydra_image_store_adt4")
+pytest.importorskip("hydra_python.image_store")
 pytest.importorskip("zstandard")
 PIL = pytest.importorskip("PIL.Image")
 
-from hydra_image_store import FrameKind, ImageStore, check_store, make_node_id  # noqa: E402
-from hydra_image_store_adt4.sam3 import add_sam3_observation  # noqa: E402
+from hydra_python.image_store import (  # noqa: E402
+    EXTERNAL_TRACK_BASE,
+    FrameKind,
+    ImageStore,
+    check_store,
+    make_node_id,
+)
 
 from fleetlink import image_transfer as transfer  # noqa: E402
 from fleetlink.image_pack import main, pack_store, unpack_store  # noqa: E402
+
+
+def add_sam3_observation(writer, node_id, frame_id, **kwargs):
+    """A SAM3 write-back: one external track per node, bound to it."""
+    track = EXTERNAL_TRACK_BASE | (int(node_id) & ((1 << 40) - 1))
+    with writer.batch():
+        writer.bind_track(track, node_id)
+        return writer.add_observation(track, frame_id, **kwargs)
 
 
 def make_T(R=None, t=(0, 0, 0)):
@@ -502,7 +514,7 @@ def test_missing_zstandard_is_a_clear_error(run, monkeypatch):
 
 def test_own_keyframe_sql_function():
     """keyframes mode = the agent nodes' own keyframes: anchored, identity offset."""
-    from hydra_image_store.codec import transform_to_blob
+    from hydra_python.image_store.codec import transform_to_blob
 
     own = transfer._own_keyframe
     assert own(None, None) == 0  # unanchored (no agent node yet / too far)

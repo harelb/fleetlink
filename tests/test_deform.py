@@ -11,13 +11,21 @@ import numpy as np
 import pytest
 
 from fleetlink import codec, deform
-from fleetlink.mesh_deform_link import ControlPoints, DeformView, OdomMesh, tile_odom_mesh, tile_vids
+from fleetlink.mesh_deform_link import (
+    ControlPoints,
+    DeformView,
+    OdomMesh,
+    tile_odom_mesh,
+    tile_vids,
+)
 
 NS = 1_000_000_000
 
 
 def _rot_z(a):
-    return np.array([[np.cos(a), -np.sin(a), 0], [np.sin(a), np.cos(a), 0], [0, 0, 1.0]])
+    return np.array(
+        [[np.cos(a), -np.sin(a), 0], [np.sin(a), np.cos(a), 0], [0, 0, 1.0]]
+    )
 
 
 def _quat_z(a):
@@ -44,7 +52,9 @@ def test_uniform_correction_is_a_rigid_motion():
     rng = np.random.default_rng(0)
     pts = rng.uniform(0, 12, (500, 3)).astype(np.float32)
     st = rng.integers(0, int(cst.max()), 500).astype(np.uint64)
-    out = deform.deform(pts, st, ctrl, cst, pose, np.ones(len(ctrl), bool), k=3, tol_s=1e6)
+    out = deform.deform(
+        pts, st, ctrl, cst, pose, np.ones(len(ctrl), bool), k=3, tol_s=1e6
+    )
     want = (R @ pts.T.astype(np.float64)).T + t
     assert np.abs(out - want).max() < 1e-4
 
@@ -74,7 +84,10 @@ def _reference(pts, st, ctrl, cst, pose, valid, k, tol_s):
         w = np.ones(len(nn) - 1) if const else 1 - dd[:-1] / dmax
         q = (w[:, None] * pose[nn[:-1], 3:]).sum(0) / w.sum()
         q /= np.linalg.norm(q)
-        t = (w[:, None] * (pose[nn[:-1], :3] - np.einsum("nij,nj->ni", R[nn[:-1]], ctrl[nn[:-1]]))).sum(0) / w.sum()
+        t = (
+            w[:, None]
+            * (pose[nn[:-1], :3] - np.einsum("nij,nj->ni", R[nn[:-1]], ctrl[nn[:-1]]))
+        ).sum(0) / w.sum()
         out[i] = deform.quat_to_rot(q) @ pts[i] + t
         while lo < len(ctrl) and count > k + 1 and int(cst[lo]) < s - tol:
             if valid[lo]:
@@ -107,13 +120,17 @@ def test_indices_deform_only_those_vertices():
     pose = _poses(ctrl, np.eye(3), np.array([0.0, 0.0, 1.0]))
     pts = np.zeros((10, 3), np.float32) + 3
     st = np.zeros(10, np.uint64)
-    out = deform.deform(pts, st, ctrl, cst, pose, np.ones(len(ctrl), bool), indices=[5, 6])
+    out = deform.deform(
+        pts, st, ctrl, cst, pose, np.ones(len(ctrl), bool), indices=[5, 6]
+    )
     assert np.allclose(out[5:7, 2], 4.0) and np.allclose(out[:5, 2], 3.0)
 
 
 def test_pose_packing_round_trip():
     ctrl, _ = _grid_ctrl()
-    pose = _poses(ctrl, _rot_z(0.3), np.array([120.0, -80.0, 3.0]))  # > 32 m: int32 path
+    pose = _poses(
+        ctrl, _rot_z(0.3), np.array([120.0, -80.0, 3.0])
+    )  # > 32 m: int32 path
     valid = np.ones(len(ctrl), bool)
     valid[3] = False
     pose[3] = np.nan
@@ -122,7 +139,12 @@ def test_pose_packing_round_trip():
     assert (v2 == valid).all()
     assert np.abs(back[valid, :3] - pose[valid, :3]).max() <= 0.5e-3 + 1e-9
     # q and -q are the same rotation: compare rotations
-    assert np.abs(deform.quat_to_rot(back[valid, 3:]) - deform.quat_to_rot(pose[valid, 3:])).max() < 1e-4
+    assert (
+        np.abs(
+            deform.quat_to_rot(back[valid, 3:]) - deform.quat_to_rot(pose[valid, 3:])
+        ).max()
+        < 1e-4
+    )
     assert len(blob) < 8 * 7 * len(ctrl)
 
 
@@ -136,7 +158,9 @@ def test_odom_mesh_applies_deltas_like_pgmo():
     assert len(m.pos) == 4 and len(m.faces()) == 2
     # delta 2: previous 4 were active; 2 now archived (sent first), active part has 3
     # vertices: previous active 2,3 became 0,1 of the new active part (prev_to_curr)
-    pos2 = np.array([[0, 0, 0], [1, 1, 1], [20, 20, 20], [30, 30, 30], [40, 40, 40]], np.float32)
+    pos2 = np.array(
+        [[0, 0, 0], [1, 1, 1], [20, 20, 20], [30, 30, 30], [40, 40, 40]], np.float32
+    )
     m.apply({"prev_active_vertices": 4, "prev_active_faces": 2, "num_archived_vertices": 2,
              "prev_to_curr": {2: 0, 3: 1}, "pos": pos2, "col": np.zeros((5, 3), np.uint8),
              "stamp": np.arange(10, 15, dtype=np.uint64),
@@ -176,37 +200,59 @@ def test_odom_tiles_and_base_view_reproduce_the_deformation():
         ctrl.add_original(i, int(s), p)
     tiles = tile_odom_mesh(pos, col, faces, stamp, ctrl)
     assert all(t["odom"] for t in tiles.values())
-    assert sum(len(np.frombuffer(t["ctrl"]["idx"], np.uint32)) for t in tiles.values()) == len(cpos)
+    assert sum(
+        len(np.frombuffer(t["ctrl"]["idx"], np.uint32)) for t in tiles.values()
+    ) == len(cpos)
     view = DeformView(k=3, tol_s=15.0)
     # no values yet: the view is the odometric mesh
     v0 = view.view(tiles)
     k0 = next(k for k, t in tiles.items() if t["nv"])
     assert v0[k0]["pos"] == tiles[k0]["pos"] and "vid" not in v0[k0]
-    assert not any(k.endswith("~ctrl") for k in v0)  # control-point carriers are not drawn
+    assert not any(
+        k.endswith("~ctrl") for k in v0
+    )  # control-point carriers are not drawn
     pose = np.zeros((len(cpos), 7))
     for j, c in enumerate(cpos):
         a = 0.01 * c[0]
         pose[j, :3] = _rot_z(a) @ c + np.array([0.0, 0.03 * c[0], 0.0])
         pose[j, 3:] = _quat_z(a)
     assert view.set_values({"data": deform.pack_poses(pose, np.ones(len(cpos), bool))})
-    assert not view.set_values({"data": deform.pack_poses(pose, np.ones(len(cpos), bool))})  # same bytes
+    assert not view.set_values(
+        {"data": deform.pack_poses(pose, np.ones(len(cpos), bool))}
+    )  # same bytes
     out = view.view(tiles)
     # what the base shows == deforming the whole (tile-quantized) odometric mesh at once
-    q, packed = [], []
+    q = []
     for k, t in tiles.items():
         if not t["nv"]:
             continue
-        p0 = np.frombuffer(t["pos"], np.int16).reshape(-1, 3) * t["scale"] + np.asarray(t["origin"])
+        p0 = np.frombuffer(t["pos"], np.int16).reshape(-1, 3) * t["scale"] + np.asarray(
+            t["origin"]
+        )
         vid = tile_vids(t)
-        p1 = np.frombuffer(out[k]["pos"], np.int16).reshape(-1, 3) * t["scale"] + np.asarray(t["origin"])
+        p1 = np.frombuffer(out[k]["pos"], np.int16).reshape(-1, 3) * t[
+            "scale"
+        ] + np.asarray(t["origin"])
         q.append((vid, p0, p1))
     vid = np.concatenate([v for v, _, _ in q])
     p0 = np.concatenate([a for _, a, _ in q]).astype(np.float32)
     p1 = np.concatenate([b for _, _, b in q])
     st = stamp[vid]
-    p_back, v_back = deform.unpack_poses(deform.pack_poses(pose, np.ones(len(cpos), bool)))
+    p_back, v_back = deform.unpack_poses(
+        deform.pack_poses(pose, np.ones(len(cpos), bool))
+    )
     order = np.argsort(vid, kind="stable")
-    want = deform.deform(p0, st // NS * NS + (st % NS) // 1_000_000 * 1_000_000, cpos, cst, p_back, v_back, 3, 15.0, indices=order)
+    want = deform.deform(
+        p0,
+        st // NS * NS + (st % NS) // 1_000_000 * 1_000_000,
+        cpos,
+        cst,
+        p_back,
+        v_back,
+        3,
+        15.0,
+        indices=order,
+    )
     assert np.abs(p1 - want).max() <= codec.QUANT  # requantized at 1 cm
     assert np.abs(p1 - p0).max() > 0.1  # it really moved
     # a new values message changes every tile's hash for the viewer, not the raw tiles
@@ -221,7 +267,10 @@ PGMO_HARNESS = os.environ.get("PGMO_DEFORM_HARNESS", "")
 LC_RUN = os.path.expanduser("~/adt4_output/imgstore_lc_on_20261017/hydra/backend")
 
 
-@pytest.mark.skipif(not (PGMO_HARNESS and os.path.exists(LC_RUN)), reason="set PGMO_DEFORM_HARNESS (C++ ground truth)")
+@pytest.mark.skipif(
+    not (PGMO_HARNESS and os.path.exists(LC_RUN)),
+    reason="set PGMO_DEFORM_HARNESS (C++ ground truth)",
+)
 def test_matches_kimera_pgmo_on_a_real_loop_closure_run(tmp_path):
     """C++ ground truth: Kimera-PGMO's deformPoints on a real Hydra run with 77
     loop closures (see docs/MESH_DEFORMATION_DESIGN.md for the harness)."""
@@ -244,8 +293,12 @@ def test_matches_kimera_pgmo_on_a_real_loop_closure_run(tmp_path):
     cv.tofile(tmp_path / "ctrl_val.f64")
     pts.tofile(tmp_path / "vert_pos.f32")
     st.tofile(tmp_path / "vert_stamp.u64")
-    subprocess.run([PGMO_HARNESS, str(tmp_path), "3", "15.0"], check=True, capture_output=True)
+    subprocess.run(
+        [PGMO_HARNESS, str(tmp_path), "3", "15.0"], check=True, capture_output=True
+    )
     ref = np.fromfile(tmp_path / "out_pos.f32", np.float32).reshape(-1, 3)
-    got = deform.deform(pts, st, g["ctrl"], g["ctrl_stamp"], g["pose"], g["valid"], k=3, tol_s=15.0)
+    got = deform.deform(
+        pts, st, g["ctrl"], g["ctrl_stamp"], g["pose"], g["valid"], k=3, tol_s=15.0
+    )
     e = np.linalg.norm(got.astype(np.float64) - ref, axis=1)
     assert np.mean(e < 1e-2) > 0.999 and e.max() < 0.05

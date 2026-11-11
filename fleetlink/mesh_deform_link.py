@@ -69,9 +69,15 @@ class OdomMesh:
         vstart = nv - int(d["prev_active_vertices"]) if nv else 0
         if vstart < 0:
             raise ValueError("mesh delta does not fit (missed a delta?)")
-        self.pos = np.concatenate([self.pos[:vstart], np.asarray(d["pos"], np.float32).reshape(-1, 3)])
-        self.col = np.concatenate([self.col[:vstart], np.asarray(d["col"], np.uint8).reshape(-1, 3)])
-        self.stamp = np.concatenate([self.stamp[:vstart], np.asarray(d["stamp"], np.uint64).reshape(-1)])
+        self.pos = np.concatenate(
+            [self.pos[:vstart], np.asarray(d["pos"], np.float32).reshape(-1, 3)]
+        )
+        self.col = np.concatenate(
+            [self.col[:vstart], np.asarray(d["col"], np.uint8).reshape(-1, 3)]
+        )
+        self.stamp = np.concatenate(
+            [self.stamp[:vstart], np.asarray(d["stamp"], np.uint64).reshape(-1)]
+        )
         threshold = vstart + int(d["num_archived_vertices"])
 
         all_f = np.concatenate([self.f_arch, self.f_pend, self.f_act])
@@ -105,7 +111,7 @@ def _remap_faces(faces: np.ndarray, offset: int, remap: dict) -> np.ndarray:
     hi = faces >= offset
     if hi.any():
         lut = {int(k): int(v) for k, v in remap.items()}
-        for (i, j) in zip(*np.nonzero(hi)):
+        for i, j in zip(*np.nonzero(hi)):
             v = lut.get(int(faces[i, j]) - offset)
             if v is None:
                 keep[i] = False
@@ -127,7 +133,10 @@ def delta_from_msg(msg) -> dict:
             col[i] = (int(v.color.r * 255), int(v.color.g * 255), int(v.color.b * 255))
         if v.has_stamp:
             stamp[i] = v.stamp
-    tri = lambda fs: np.array([list(f.vertex_indices) for f in fs], np.int64).reshape(-1, 3)  # noqa: E731
+
+    def tri(fs):
+        return np.array([list(f.vertex_indices) for f in fs], np.int64).reshape(-1, 3)
+
     return {
         "prev_active_vertices": msg.prev_active_vertices,
         "prev_active_faces": msg.prev_active_faces,
@@ -183,8 +192,12 @@ class ControlPoints:
             self.valid[i] = True
             if not self.known[i] and st:
                 self.stamp[i] = st
-        t_moved = np.nan_to_num(np.abs(self.pose[:, :3] - before[:, :3]), nan=1.0).max(initial=0)
-        q_moved = np.nan_to_num(np.abs(self.pose[:, 3:] - before[:, 3:]), nan=1.0).max(initial=0)
+        t_moved = np.nan_to_num(np.abs(self.pose[:, :3] - before[:, :3]), nan=1.0).max(
+            initial=0
+        )
+        q_moved = np.nan_to_num(np.abs(self.pose[:, 3:] - before[:, 3:]), nan=1.0).max(
+            initial=0
+        )
         changed = t_moved >= deform.POS_QUANT or q_moved >= deform.ROT_QUANT
         if changed:
             self.version += 1
@@ -202,7 +215,9 @@ def nodes_from_pose_graph(msg):
     return out
 
 
-MAX_TILE_WIRE = 96 * 1024  # packed bytes; zenoh drops bigger messages whole on a busy link
+MAX_TILE_WIRE = (
+    96 * 1024
+)  # packed bytes; zenoh drops bigger messages whole on a busy link
 MIN_TILE_SIZE = 1.0  # m: a tile is not split below this
 
 
@@ -251,11 +266,25 @@ def _tile_into(out, pos, col, faces, stamp, t0, size, suffix, max_wire) -> None:
         used = np.unique(faces[group].reshape(-1))  # tile_mesh's vertex order
         t["vid"] = np.diff(used, prepend=0).astype(np.uint32).tobytes()
         t["t0"] = t0
-        t["stamp"] = ((stamp[used].astype(np.int64) - t0) // 1_000_000).astype(np.uint32).tobytes()
+        t["stamp"] = (
+            ((stamp[used].astype(np.int64) - t0) // 1_000_000)
+            .astype(np.uint32)
+            .tobytes()
+        )
         t["odom"] = ODOM_TILE_VERSION
         t["ctrl"] = {"idx": b"", "stamp": b"", "pos": b""}
         if size / 2 >= MIN_TILE_SIZE and len(codec.pack(t)) > max_wire:
-            _tile_into(out, pos, col, faces[group], stamp, t0, size / 2, f"@{size / 2:g}", max_wire)
+            _tile_into(
+                out,
+                pos,
+                col,
+                faces[group],
+                stamp,
+                t0,
+                size / 2,
+                f"@{size / 2:g}",
+                max_wire,
+            )
             continue
         h = hashlib.blake2b(digest_size=8)
         h.update(t["hash"].encode())
@@ -375,7 +404,10 @@ class DeformView:
             return dict(tiles)
         with self._lock:
             values = self.values
-        key = (tuple(sorted((k, t["hash"]) for k, t in odom.items())), values[2] if values else None)
+        key = (
+            tuple(sorted((k, t["hash"]) for k, t in odom.items())),
+            values[2] if values else None,
+        )
         if key == self._cache_key:
             out = dict(self._cache)
         else:
@@ -402,7 +434,9 @@ class DeformView:
             q = np.frombuffer(t["pos"], np.int16).reshape(-1, 3).astype(np.float64)
             pos = q * t["scale"] + np.asarray(t["origin"])
             vid = tile_vids(t)
-            st = np.frombuffer(t["stamp"], np.uint32).astype(np.uint64) * np.uint64(1_000_000) + np.uint64(t["t0"])
+            st = np.frombuffer(t["stamp"], np.uint32).astype(np.uint64) * np.uint64(
+                1_000_000
+            ) + np.uint64(t["t0"])
             parts.append((k, pos, vid, st))
         out = {}
         moved = None
@@ -430,12 +464,18 @@ class DeformView:
             allpos = np.concatenate([p for _, p, _, _ in parts]).astype(np.float32)
             allvid = np.concatenate([v for _, _, v, _ in parts])
             allst = np.concatenate([s for _, _, _, s in parts])
-            order = np.argsort(allvid, kind="stable")  # PGMO visits vertices in index order
-            moved = deform.deform(allpos, allst, cpos, cst, pz, vz, self.k, self.tol_s, indices=order)
+            order = np.argsort(
+                allvid, kind="stable"
+            )  # PGMO visits vertices in index order
+            moved = deform.deform(
+                allpos, allst, cpos, cst, pz, vz, self.k, self.tol_s, indices=order
+            )
         o = 0
         for k, pos, _vid, _st in parts:
             t = odom[k]
-            new = moved[o : o + len(pos)].astype(np.float64) if moved is not None else pos
+            new = (
+                moved[o : o + len(pos)].astype(np.float64) if moved is not None else pos
+            )
             o += len(pos)
             out[k] = _requantize(t, new, values[2] if values is not None else None)
         return out

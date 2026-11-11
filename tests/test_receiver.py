@@ -12,7 +12,11 @@ def _rx():
     events = []
     # mesh LOD requests at each epoch are covered in test_mesh_lod.py
     rx = Receiver(
-        tr, lambda r, k, d: events.append((r, k, d)), clock=clock, threaded=False, mesh_lod=None
+        tr,
+        lambda r, k, d: events.append((r, k, d)),
+        clock=clock,
+        threaded=False,
+        mesh_lod=None,
     )
     rx.start()
     return tr, clock, rx, events
@@ -287,15 +291,23 @@ def test_reloc_passes_through_state_and_link():
     rl = {"prior_lcs": 3, "best_assoc": 9, "last_lc_age_s": 2.0, "lcs": [], "jumps": 1}
     rx._on_msg("adt4/r/state", env_bytes("r", "state", 0, "E1", {"pose": None}))
     assert rx.link("r")["reloc"] is None  # old agent: no field
-    rx._on_msg("adt4/r/state", env_bytes("r", "state", 1, "E1", {"pose": None, "reloc": rl}))
+    rx._on_msg(
+        "adt4/r/state", env_bytes("r", "state", 1, "E1", {"pose": None, "reloc": rl})
+    )
     assert rx.state("r")["reloc"] == rl
     assert rx.link("r")["reloc"] == rl
 
 
 def test_link_reports_the_robots_own_per_class_rates():
     tr, clock, rx, events = _rx()
-    stats = {"rate": {"C3": 90_000.0}, "sent": {"C3": 1_234_567}, "queue": {"C3": {"n": 4, "bytes": 30_000}}}
-    rx._on_msg("adt4/r/state", env_bytes("r", "state", 0, "E1", {"pose": None, "stats": stats}))
+    stats = {
+        "rate": {"C3": 90_000.0},
+        "sent": {"C3": 1_234_567},
+        "queue": {"C3": {"n": 4, "bytes": 30_000}},
+    }
+    rx._on_msg(
+        "adt4/r/state", env_bytes("r", "state", 0, "E1", {"pose": None, "stats": stats})
+    )
     link = rx.link("r")
     assert link["robot_rates"] == {"C3": 90_000.0}
     assert link["robot_sent"] == {"C3": 1_234_567}

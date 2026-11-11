@@ -83,7 +83,9 @@ def test_decoding_a_binary_graph_reports_all_nodes_and_streams_c2():
     st = core.stats()
     assert st["nodes"] == total and st["tiles"] > 0
     assert _c2_upserts(tr) == total  # the whole graph went out on C2
-    assert sum(len(d) for k, d, _c in tr.sent if k.endswith("/dsg/delta")) > 705  # vs ~705 B of empty snapshots seen on hamilton
+    assert (
+        sum(len(d) for k, d, _c in tr.sent if k.endswith("/dsg/delta")) > 705
+    )  # vs ~705 B of empty snapshots seen on hamilton
 
 
 def test_decoding_the_real_hydra_graph():

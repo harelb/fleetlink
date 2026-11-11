@@ -79,7 +79,9 @@ def test_state_omits_frame_align_until_looked_up():
 
 def test_state_carries_frame_align_with_age():
     tr, clock, core = _core()
-    buf = FakeBuffer({("map", "r/odom"): _tf(1, 2, 0, 0.7071068, 0, 0, 0.7071068, sec=998)})
+    buf = FakeBuffer(
+        {("map", "r/odom"): _tf(1, 2, 0, 0.7071068, 0, 0, 0.7071068, sec=998)}
+    )
     core.on_frame_align(lookup_frame_align(buf, "map", "r/odom"))
     core.tick(clock.advance(0.5))
     fa = _states(tr)[-1]["frame_align"]

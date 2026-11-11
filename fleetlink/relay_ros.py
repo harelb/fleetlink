@@ -67,6 +67,30 @@ def import_type(path: str):
     return getattr(importlib.import_module(f"{pkg}.{kind}"), name)
 
 
+def drop_unavailable_types(config: RelayConfig, log=None) -> list[str]:
+    """Drop (in place) the topics and services whose message type this machine
+    cannot import, e.g. a robot_executor_msgs older than relay.yaml; returns them.
+
+    The config hash stays that of relay.yaml, so peers still compare configs; an
+    entry dropped on one side only shows as a missing endpoint, not a crash.
+    """
+    dropped = []
+
+    def ok(entry, key):
+        try:
+            import_type(entry["type"])
+            return True
+        except (ImportError, AttributeError, ValueError):
+            dropped.append(f"{entry[key]} ({entry['type']})")
+            return False
+
+    config.topics = [t for t in config.topics if ok(t, "topic")]
+    config.services = [s for s in config.services if ok(s, "service")]
+    if dropped and log is not None:
+        log(f"fleetlink relay: message types not installed, not relayed: {dropped}")
+    return dropped
+
+
 @functools.lru_cache(maxsize=None)
 def type_hash(type_str: str) -> str | None:
     """The ROS 2 type hash (``RIHS01_…``, from the package's generated
@@ -179,7 +203,9 @@ class _RelayEnd:
     """What both ends share: raw publishers, proxy service servers, real service
     calls, the tick thread."""
 
-    def __init__(self, node, tick_hz: float = 20.0, max_proxy_calls: int = MAX_PROXY_CALLS):
+    def __init__(
+        self, node, tick_hz: float = 20.0, max_proxy_calls: int = MAX_PROXY_CALLS
+    ):
         from rclpy.callback_groups import ReentrantCallbackGroup
 
         self.node = node
@@ -340,6 +366,7 @@ class RobotRelay(_RelayEnd):
         super().__init__(node, tick_hz)
         self.robot = robot
         nd = node
+        drop_unavailable_types(config, self.log.warn)
         # publishers first: a message may arrive as soon as the core subscribes
         self._pubs: dict[str, object] = {}
         for e in config.resolve(robot, platform).in_topics("robot"):
@@ -475,6 +502,7 @@ class BaseBridge(_RelayEnd):
         from std_msgs.msg import String
 
         self.transport = transport
+        drop_unavailable_types(config, self.log.warn)
         self.config = config
         self.base = base
         self.status_period = status_period

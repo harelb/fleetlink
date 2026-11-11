@@ -47,7 +47,9 @@ _PF_DTYPES = {
 }
 
 
-def cloud_arrays(fields, point_step, data, width, height=1, row_step=None, bigendian=False):
+def cloud_arrays(
+    fields, point_step, data, width, height=1, row_step=None, bigendian=False
+):
     """PointCloud2 buffer → ``(xyz float32 (N, 3), intensity float32 (N,) | None)``.
 
     ``fields``: ``[(name, offset, datatype), ...]`` (PointField count 1 each)."""
@@ -59,7 +61,9 @@ def cloud_arrays(fields, point_step, data, width, height=1, row_step=None, bigen
     dt = np.dtype(
         {
             "names": keep,
-            "formats": [np.dtype(_PF_DTYPES[byname[k][1]]).newbyteorder(order) for k in keep],
+            "formats": [
+                np.dtype(_PF_DTYPES[byname[k][1]]).newbyteorder(order) for k in keep
+            ],
             "offsets": [byname[k][0] for k in keep],
             "itemsize": int(point_step),
         }
@@ -68,7 +72,9 @@ def cloud_arrays(fields, point_step, data, width, height=1, row_step=None, bigen
     buf = np.frombuffer(memoryview(data), dtype=np.uint8)
     row_step = int(row_step or width * point_step)
     if row_step != width * point_step and height > 1:  # padded rows
-        buf = buf[: row_step * height].reshape(height, row_step)[:, : width * point_step]
+        buf = buf[: row_step * height].reshape(height, row_step)[
+            :, : width * point_step
+        ]
         buf = np.ascontiguousarray(buf).reshape(-1)
     pts = buf[: width * height * point_step].view(dt)
     xyz = np.stack([pts["x"], pts["y"], pts["z"]], axis=1).astype(np.float32)

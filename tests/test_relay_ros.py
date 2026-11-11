@@ -311,7 +311,9 @@ def test_proxy_calls_never_starve_the_agent(zenoh_router, monkeypatch):
     cex = SingleThreadedExecutor(context=ctx)
     cex.add_node(caller)
     ex.add_node(agent_node)
-    threads = [threading.Thread(target=f, daemon=True) for f in (pump, ex.spin, cex.spin)]
+    threads = [
+        threading.Thread(target=f, daemon=True) for f in (pump, ex.spin, cex.spin)
+    ]
     for th in threads:
         th.start()
     try:
@@ -325,8 +327,12 @@ def test_proxy_calls_never_starve_the_agent(zenoh_router, monkeypatch):
         t0 = time.time()
         done = []
         for i in range(n):
-            fut = cli.call_async(UpdateHoldingState.Request(is_holding=True, id=f"O({i})"))
-            fut.add_done_callback(lambda f: done.append((time.time(), f.result().success)))
+            fut = cli.call_async(
+                UpdateHoldingState.Request(is_holding=True, id=f"O({i})")
+            )
+            fut.add_done_callback(
+                lambda f: done.append((time.time(), f.result().success))
+            )
         # all but MAX_PROXY_CALLS come back at once, with the default response
         assert _wait(lambda: len(done) >= n - relay_ros.MAX_PROXY_CALLS, 2.0), len(done)
         assert all(not ok for _, ok in done)

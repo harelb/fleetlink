@@ -34,10 +34,9 @@ FLEETLINK_STALL_S=60 zsh -c '...same...'
 * **Robot executor.** A bag session (`spot_bag*`) has no executor, so plans are acked with
   `subs: 0` and no `action_result` comes back. For the plan → result checks the robot needs
   one of:
-  * the spot sim executor. No generated session combines `spot_sim` with `fleetlink`. Add
-    `spot_sim_fleetlink: {launch_config: [main, spot_sim, fleetlink], config: [default]}` to
-    `dcist_launch_system/config_generation/experiment_manifest.yaml` and regenerate (see the
-    `adt4-config-generation` skill).
+  * the spot sim executor: the `spot_sim_fleetlink-default` session (`spot_sim` + the
+    `fleetlink` window; like every fleetlink window it starts the agent only in fleetlink
+    mode).
   * the real Spot (`spot-default`).
 
 ## 1. Record the router-mode baseline
