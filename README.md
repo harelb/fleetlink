@@ -542,7 +542,7 @@ preference. Verified on zenoh 1.8 (`tests/test_fleetlink_router.py`):
 picks the mode, `run-adt4` derives `ADT4_FLEET_LINK`, `ADT4_FLEETLINK_CONNECT` and
 `ADT4_FLEETLINK_PORT` from it, and the generated `fleetlink` / `fleetlink_base` tmux windows start
 the agent, the router and the bridge; ADT4 keeps its relay table in
-`dcist_launch_system/config/fleetlink/relay.yaml`.
+`dcist_launch_system/fleetlink/relay.yaml`.
 
 Not done: zenoh access control, so that a robot can only put `adt4/<self>/**`.
 
