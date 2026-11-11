@@ -1,5 +1,5 @@
 """Fleetlink mode end to end on the real topology (``harness.Fleet``): a base ROS
-router, the fleetlink router (``bin/fleetlink-router``), two robot ROS routers,
+router, the fleetlink router (``scripts/fleetlink-router``), two robot ROS routers,
 real ``fleetlink-agent`` (relay on) and ``fleetlink-bridge`` processes, fake
 robot/base nodes, and a :class:`harness.FaultProxy` on each robot's radio link.
 

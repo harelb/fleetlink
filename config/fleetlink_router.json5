@@ -1,6 +1,6 @@
 /// fleetlink router: the base station's dedicated zenoh router for the radio
 /// (topology.yaml fleet_defaults.fleet_link: fleetlink). Started by
-/// fleetlink/bin/fleetlink-router (rmw_zenohd with ZENOH_ROUTER_CONFIG_URI=this file).
+/// fleetlink/scripts/fleetlink-router (rmw_zenohd with ZENOH_ROUTER_CONFIG_URI=this file).
 ///
 /// Robot fleetlink agents connect to it as zenoh *clients* over the radio, one transport
 /// per robot; the base fleetlink-bridge and console receiver connect over loopback.

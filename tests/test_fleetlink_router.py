@@ -1,4 +1,4 @@
-"""fleetlink router (bin/fleetlink-router + config/fleetlink_router.json5) and how a
+"""fleetlink router (scripts/fleetlink-router + config/fleetlink_router.json5) and how a
 zenoh client treats a list of connect endpoints.
 
 The endpoint-list tests pin the failover decision in fleetlink mode: the robot agent
@@ -24,14 +24,14 @@ from conftest import _port_open
 pytestmark = pytest.mark.integration
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROUTER_BIN = os.path.join(HERE, "..", "bin", "fleetlink-router")
+ROUTER_BIN = os.path.join(HERE, "..", "scripts", "fleetlink-router")
 ROUTER_CONFIG = os.path.join(HERE, "..", "config", "fleetlink_router.json5")
 PORT_A = int(os.environ.get("FLEETLINK_ROUTER_TEST_PORT", 17460))  # NEVER 7447
 PORT_B = PORT_A + 1
 
 
 class FleetlinkRouter:
-    """bin/fleetlink-router PORT, i.e. rmw_zenohd on fleetlink_router.json5."""
+    """scripts/fleetlink-router PORT, i.e. rmw_zenohd on fleetlink_router.json5."""
 
     def __init__(self, port: int):
         assert port != 7447

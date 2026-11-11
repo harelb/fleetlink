@@ -2,14 +2,9 @@ import os
 import signal
 import socket
 import subprocess
-import sys
 import time
 
 import pytest
-
-HERE = os.path.dirname(__file__)
-sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..")))
-sys.path.insert(0, HERE)
 
 # throwaway router; NEVER 7447 (the live system's router). FLEETLINK_TEST_PORT moves
 # it (and the late router on the next port) when another run uses these ports.
@@ -18,12 +13,6 @@ ROUTER_ENDPOINT = f"tcp/127.0.0.1:{ROUTER_PORT}"
 LATE_ROUTER_PORT = (
     ROUTER_PORT + 1
 )  # started after the sessions (no-router / restart tests)
-
-
-def pytest_configure(config):
-    config.addinivalue_line(
-        "markers", "integration: needs a zenoh router / ROS / real data"
-    )
 
 
 def _port_open(port: int) -> bool:

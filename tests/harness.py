@@ -9,7 +9,7 @@
     │  └ node_host --role robot    │   :r1_proxy   │  │  └ node_host --role base    │
     └──────────────────────────────┘               ▼  └───────────────────────┼──────┘
     robot r2 graph (domain D2), same shape ──▶ fleetlink-router :fleetlink ◀──┘
-                                                (bin/fleetlink-router, json5)
+                                                (scripts/fleetlink-router, json5)
 
 Every box is its own process (``start_new_session``; teardown is ``killpg``),
 every ROS process points its rmw_zenoh session at its own router with
@@ -38,9 +38,12 @@ from collections import defaultdict
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PKG = os.path.abspath(os.path.join(HERE, ".."))
-BIN = os.path.join(PKG, "bin")
+SCRIPTS = os.path.join(PKG, "scripts")
 NODE_HOST = os.path.join(HERE, "harness_nodes", "node_host.py")
 RELAY_CONFIG = os.path.join(HERE, "data", "relay_test.yaml")
+# the installed console scripts' entry points, run from this checkout (PYTHONPATH)
+AGENT = "from fleetlink.launcher import agent; agent()"
+BRIDGE = "from fleetlink.launcher import bridge; bridge()"
 RMW_ZENOHD = "/opt/ros/jazzy/lib/rmw_zenoh_cpp/rmw_zenohd"
 TAG_VAR = "FLEETLINK_HARNESS_TAG"
 LIVE_PORT = 7447
@@ -515,7 +518,10 @@ class Fleet:
             TAG_VAR: self.tag,
             "RMW_IMPLEMENTATION": "rmw_zenoh_cpp",
             "PYTHONUNBUFFERED": "1",
-            "_FLEETLINK_REEXEC": "1",  # we already run spark_env's python
+            "_FLEETLINK_REEXEC": "1",  # already the interpreter with zenoh
+            "PYTHONPATH": os.pathsep.join(
+                p for p in (PKG, os.environ.get("PYTHONPATH")) if p
+            ),
             "RUST_LOG": os.environ.get("FLEETLINK_HARNESS_RUST_LOG", "warn"),
             "ADT4_ROBOT_NAME": self.base_name,
         })  # fmt: skip
@@ -544,11 +550,11 @@ class Fleet:
         env = self._env()
         # zenoh 1.8 moves payloads > 3 kB through shared memory between processes
         # on one host (transport/shared_memory/transport_optimization), which would
-        # bypass the FaultProxy; a real radio link never can.  bin/fleetlink-router
+        # bypass the FaultProxy; a real radio link never can.  scripts/fleetlink-router
         # appends its port override to this.
         env["ZENOH_CONFIG_OVERRIDE"] = "transport/shared_memory/enabled=false"
         port = self.ports["fleetlink"]
-        cmd = ["bash", "-c", f"source /opt/ros/jazzy/setup.bash; exec {BIN}/fleetlink-router {port}"]  # fmt: skip
+        cmd = ["bash", "-c", f"source /opt/ros/jazzy/setup.bash; exec {SCRIPTS}/fleetlink-router {port}"]  # fmt: skip
         return Proc("fleetlink_router", cmd, env, self.tmp)
 
     def _wait_listen(self, port: int, proc: Proc, timeout: float = 15.0) -> None:
@@ -589,7 +595,7 @@ class Fleet:
         benv = self._env(self.ports["base_ros"], self.domains["base"])
         fl_ep = f"tcp/127.0.0.1:{self.ports['fleetlink']}"
         self.bridge = self._spawn(Proc("bridge", [
-            sys.executable, os.path.join(BIN, "fleetlink-bridge"), "--ros-args",
+            sys.executable, "-c", BRIDGE, "--ros-args",
             "-p", f"zenoh_connect:={fl_ep}", "-p", f"topology:={self.topology}",
             "-p", f"relay_config:={RELAY_CONFIG}", "-p", f"base_name:={self.base_name}",
         ], benv, self.tmp))  # fmt: skip
@@ -602,7 +608,7 @@ class Fleet:
             renv = self._env(self.ports[f"{r}_ros"], self.domains[r])
             px = self.robots[r]["proxy"]
             self.robots[r]["agent"] = self._spawn(Proc(f"{r}_agent", [
-                sys.executable, os.path.join(BIN, "fleetlink-agent"), "--ros-args",
+                sys.executable, "-c", AGENT, "--ros-args",
                 "-r", f"__ns:=/{r}", "-p", f"robot_name:={r}",
                 "-p", f"relay_config:={RELAY_CONFIG}", "-p", f"topology:={self.topology}",
                 "-p", f"zenoh_connect:={px.endpoint}", "-p", "grid_period_s:=0.2",

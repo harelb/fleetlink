@@ -3,20 +3,41 @@
 <package format="3">
   <name>fleetlink</name>
   <version>0.1.0</version>
-  <description>QoS-aware robot to base-station bridge for live Hydra scene graphs, meshes and robot state over zenoh</description>
+  <description>QoS-aware robot to base-station link over zenoh for lossy radios: live Hydra scene graphs, meshes, robot state, camera video and a generic ROS relay</description>
   <maintainer email="harelb@mit.edu">harelb</maintainer>
-  <license>BSD-3-Clause</license>
+  <license>Apache-2.0</license>
 
+  <!-- agent and bridge -->
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>tf2_msgs</exec_depend>
+  <exec_depend>rmw_zenoh_cpp</exec_depend>
+  <!-- agent: Hydra scene graph input and decoding -->
   <exec_depend>hydra_msgs</exec_depend>
-  <exec_depend>robot_executor_msgs</exec_depend>
-  <exec_depend>ros_system_monitor_msgs</exec_depend>
   <exec_depend>spark_dsg</exec_depend>
+  <!-- agent: occupancy grid, paths, markers, cameras, battery (each skipped with a
+       warning when missing) -->
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>visualization_msgs</exec_depend>
+  <!-- Optional, imported only when installed (the feature is off otherwise):
+       robot_executor_msgs (Spot executor guards / results), ros_system_monitor_msgs
+       (health), roman_msgs (relocalization evidence), kimera_pgmo_msgs and
+       pose_graph_tools_msgs (mesh_source: odometric), phx_nav_msgs and
+       clearpath_platform_msgs (phoenix platform), hydra_python (image-store mirror and
+       prior-map pack/unpack). The relay imports each relayed message type from its
+       package and skips types that are not installed. -->
+
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-msgpack</exec_depend>
   <exec_depend>python3-zstandard</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
+  <!-- Optional Python / system deps: python3-opencv or python3-pil (camera frames,
+       image-store codec), python3-scipy (mesh_source: odometric), ffmpeg (live
+       video). eclipse-zenoh==1.8.0 (pip, no rosdep key) is required by the agent,
+       the bridge and any receiver: see the README. -->
 
   <test_depend>python3-pytest</test_depend>
 

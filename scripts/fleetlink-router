@@ -1,17 +1,36 @@
 #!/usr/bin/env bash
 # fleetlink-router [PORT]: the base station's dedicated zenoh router for fleetlink.
 #
-# Runs rmw_zenohd with fleetlink/config/fleetlink_router.json5 (listen tcp/[::]:7450,
-# connect to nothing, no scouting/gossip/adminspace/plugins). PORT overrides the listen
-# port (default: the json5's 7450 = topology.yaml zenoh.fleetlink_port). 7447 is refused:
-# that is the ROS router's port, and the two networks must stay separate.
+# Runs rmw_zenohd with fleetlink_router.json5 (listen tcp/[::]:7450, connect to nothing,
+# no scouting/gossip/adminspace/plugins). PORT overrides the listen port (default: the
+# json5's 7450). 7447 is refused: that is the ROS router's port, and the two networks
+# must stay separate.
+#
+# Installed as lib/fleetlink/fleetlink-router (ros2 run fleetlink fleetlink-router [PORT]);
+# the json5 is found in the package share directory, or next to it in a source checkout.
 #
 # Env: FLEETLINK_ROUTER_CONFIG overrides the json5 path; an existing ZENOH_CONFIG_OVERRIDE
 # is kept (the port override is appended to it).
 set -euo pipefail
 
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  sed -n '2,13s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"
+  exit 0
+fi
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-config="${FLEETLINK_ROUTER_CONFIG:-$here/../config/fleetlink_router.json5}"
+config="${FLEETLINK_ROUTER_CONFIG:-}"
+if [[ -z "$config" ]]; then
+  # installed: <prefix>/lib/fleetlink -> <prefix>/share/fleetlink/config; source: scripts/ -> config/
+  for c in "$here/../../share/fleetlink/config/fleetlink_router.json5" \
+           "$here/../config/fleetlink_router.json5"; do
+    if [[ -f "$c" ]]; then config="$c"; break; fi
+  done
+fi
+if [[ -z "$config" ]]; then
+  echo "fleetlink-router: fleetlink_router.json5 not found (set FLEETLINK_ROUTER_CONFIG)" >&2
+  exit 1
+fi
 if [[ ! -f "$config" ]]; then
   echo "fleetlink-router: config not found: $config" >&2
   exit 1
