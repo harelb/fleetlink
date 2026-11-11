@@ -2,7 +2,7 @@
 
 Hydra and Khronos do not write the image store: they log keyframe zips, track logs
 and event logs, and the store's tailer builds the store while Hydra runs
-(FORMAT.md §6). The tail mode is Hydra PR #221 (not on Hydra develop); the tests that
+(the image store's FORMAT.md §6 in Hydra). The tail mode is Hydra PR #221 (not on Hydra develop); the tests that
 need it skip without it. The mirror must only send frames the tailer has settled (anchor and
 keyframe role decided), carry kept object observations with their node binding (object
 images on the base during the run), key the store session on the tailer's Hydra

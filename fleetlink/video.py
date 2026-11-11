@@ -1,4 +1,4 @@
-"""Live camera video (class C5, API.md §12).
+"""Live camera video (class C5, ADT4 console API.md §12).
 
 The base turns a stream on with the C0 op ``video {camera, enable, fps, kbps,
 width, codec}`` and repeats it as a keepalive; a stream with no ``enable``
@@ -27,7 +27,7 @@ each camera fitted into its cell, aspect kept).  Every mosaic frame carries
 ``tiles``: ``[[camera, x, y, w, h, stamp, age_s], ...]`` (the camera's rectangle
 in the picture, w = h = 0 while it has no frame yet; ``age_s`` = how old that
 camera's frame was when sampled).  One encoder for N cameras costs about half
-the CPU and a fifth of the memory of N encoders (docs in API.md §12).
+the CPU and a fifth of the memory of N encoders (docs in ADT4 console API.md §12).
 
 Units: ``kbps`` = kilobits per second (encoder bitrate); budgets are bytes/s.
 """

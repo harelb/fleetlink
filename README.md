@@ -1,12 +1,118 @@
 # fleetlink
 
-fleetlink is a QoS-aware robot→base-station bridge for the ADT4 scene graph, mesh, robot state and
-RViz-style overlays, carried over zenoh. A robot-side **agent** turns ROS topics into compact,
-budgeted zenoh messages. A base-side **receiver**, which runs inside the
-[ADT4 console](../adt4_console/README.md), mirrors every robot and repairs what got lost.
+fleetlink carries a robot fleet's live state to a base station over lossy, low-bandwidth radio
+links, on zenoh, with ROS 2 at both ends. On each robot an **agent** turns ROS topics (Hydra 3D
+scene graphs and meshes, pose and TF, executor guards and results, health, occupancy grid,
+paths, cameras and the image store) into compact messages in seven QoS classes, each with a
+byte budget and its own repair rule, and serves camera frames and live video on demand. On the
+base a **receiver** mirrors every robot and repairs what got lost, without the transport ever
+blocking on a congested radio. A generic **ROS relay** (`fleetlink-agent` on the robot,
+`fleetlink-bridge` on the base) carries a configured list of ROS topics, transforms and
+services across, so each machine's ROS graph can stay on that machine.
 
-The wire contract is §8, §11 and §12 of [`adt4_console/docs/API.md`](../adt4_console/docs/API.md),
-plus its *Deviations → fleetlink* section.
+fleetlink was written for [Awesome-DCIST-T4](https://github.com/MIT-SPARK/Awesome-DCIST-T4)
+(ADT4), whose web console embeds the receiver; nothing in it depends on ADT4 at runtime. The
+wire contract is documented in ADT4's console API (`adt4_console/docs/API.md` §8, §11-§13).
+
+* [Install](#install), [Run](#run), [Environment variables](#environment-variables), [Tests](#tests)
+* [Design](#design) and [stream classes](#stream-classes) (C0-C6)
+* [Generic ROS relay](#generic-ros-relay-fleetlink-mode), incl. large messages relayed in parts
+* [Router modes](#router-modes): `router` and `fleetlink` (dedicated base router)
+* [Mesh level of detail](#mesh-level-of-detail), [mesh deformation](docs/mesh_deformation.md)
+
+## Install
+
+fleetlink is a ROS 2 (Jazzy) `ament_python` package. In a colcon workspace:
+
+```bash
+git clone https://github.com/harelb/fleetlink src/fleetlink
+rosdep install --from-paths src/fleetlink --ignore-src -y   # ROS and system deps (package.xml)
+colcon build --packages-select fleetlink
+```
+
+The zenoh transport needs **`eclipse-zenoh==1.8.0`** (the zenoh of `rmw_zenoh` 0.2.x) in the
+Python that runs the agent and bridge; it has no rosdep key, so install it with pip, typically
+into a virtualenv:
+
+```bash
+pip install 'eclipse-zenoh==1.8.0' numpy msgpack zstandard PyYAML
+pip install opencv-python-headless Pillow scipy   # optional, see below
+export FLEETLINK_PYTHON=/path/to/venv/bin/python3  # the entry points re-execute there
+```
+
+Runtime dependencies:
+
+| | needed for |
+|---|---|
+| `rclpy`, `std_msgs`, `tf2_ros`, `tf2_msgs`, `ament_index_python` | agent and bridge |
+| `hydra_msgs`, `spark_dsg` | agent: the scene-graph input and its decoding |
+| `nav_msgs`, `sensor_msgs`, `visualization_msgs` | agent: grid, paths, markers, cameras (skipped with a warning when missing) |
+| `rmw_zenoh_cpp` | `fleetlink-router` (`rmw_zenohd`) |
+| numpy, msgpack, zstandard, PyYAML | everything (the wire codec) |
+| eclipse-zenoh 1.8.0 | the zenoh transport (agent, bridge, receiver) |
+| *optional:* OpenCV or Pillow | camera frames (C4) and the image-store codec |
+| *optional:* scipy | `mesh_source: odometric` (base-side mesh deformation) |
+| *optional:* `ffmpeg` with libx264 / libvpx | live video (C5; JPEG frames otherwise) |
+| *optional:* `hydra_python.image_store` (Hydra) | the image-store mirror (C6) and `fleetlink-image-pack` |
+| *optional:* `robot_executor_msgs`, `ros_system_monitor_msgs`, `roman_msgs`, `kimera_pgmo_msgs`, `pose_graph_tools_msgs`, `phx_nav_msgs`, `clearpath_platform_msgs` | executor guards/results, health, relocalization evidence, odometric mesh, phoenix platform |
+
+Optional imports are lazy: a missing one turns its feature off with a log line. The relay
+imports each relayed message type from its package and skips types that are not installed.
+
+## Run
+
+Installed executables (`lib/fleetlink/`, so `ros2 run fleetlink <name>` works):
+
+| executable | where | what |
+|---|---|---|
+| `fleetlink-agent` | robot | the agent (+ the ROS relay with `relay_config`) |
+| `fleetlink-bridge` | base | the ROS relay's base side, one process for all robots |
+| `fleetlink-router [PORT]` | base | the dedicated fleetlink zenoh router (fleetlink mode) |
+| `fleetlink-image-pack` | any | pack / unpack a run's image store for a map transfer |
+
+`config/` (`fleetlink.yaml`, `fleetlink_router.json5`, `relay.example.yaml`) is installed to
+`share/fleetlink/config/`. `fleetlink-agent --help` and `fleetlink-bridge --help` list the main
+parameters.
+
+```bash
+# robot (router mode: the local ROS router)
+ros2 run fleetlink fleetlink-agent --ros-args -r __ns:=/robot1 -p robot_name:=robot1 \
+    -p zenoh_connect:=tcp/127.0.0.1:7447
+
+# fleetlink mode: base
+ros2 run fleetlink fleetlink-router 7450
+ros2 run fleetlink fleetlink-bridge --ros-args -p zenoh_connect:=tcp/127.0.0.1:7450 \
+    -p topology:=topology.yaml -p relay_config:=relay.yaml -p base_name:=base1
+# fleetlink mode: robot, over the radio (one endpoint per network, in order)
+ros2 run fleetlink fleetlink-agent --ros-args -r __ns:=/robot1 -p robot_name:=robot1 \
+    -p zenoh_connect:=tcp/192.0.2.10:7450,tcp/198.51.100.10:7450 \
+    -p topology:=topology.yaml -p relay_config:=relay.yaml
+```
+
+On the base, a `fleetlink.receiver.Receiver` over a `fleetlink.transport.ZenohTransport`
+(connected to the same router) mirrors the robots; the ADT4 console is one such consumer.
+
+## Environment variables
+
+| variable | read by | meaning |
+|---|---|---|
+| `FLEETLINK_PYTHON` | agent, bridge entry points | interpreter to re-execute in (the one with eclipse-zenoh) |
+| `ADT4_ENV` | agent, bridge entry points | ADT4 compatibility: without `FLEETLINK_PYTHON`, re-execute in `$ADT4_ENV/spark_env/bin/python3` when it exists |
+| `_FLEETLINK_REEXEC` | entry points | internal guard: set after the re-exec, so it happens once |
+| `FLEETLINK_FFMPEG` | agent (video) | ffmpeg binary when the `ffmpeg` parameter is unset (else `ffmpeg` on `PATH`, `/usr/bin/ffmpeg`) |
+| `FLEETLINK_ROUTER_CONFIG` | `fleetlink-router` | router json5 (default: the installed `fleetlink_router.json5`) |
+| `ZENOH_CONFIG_OVERRIDE` | `fleetlink-router` | kept, with the port override appended |
+| `ROS_DISTRO` | `fleetlink-router` | the ROS setup sourced when `ros2` is not on `PATH` (default `jazzy`) |
+| `ADT4_TOPOLOGY` | agent, bridge | topology file when the `topology` parameter is unset |
+| `ADT4_ROBOT_NAME` | bridge | base name when the `base_name` parameter is unset |
+| `ADT4_OUTPUT_DIR` | agent | `store_path` default: `$ADT4_OUTPUT_DIR/image_store` |
+| `ADT4_FLEETLINK_MESH_SOURCE` | agent | `mesh_source` default (`dsg` / `odometric`) |
+| `FLEETLINK_TEST_PORT`, `FLEETLINK_ROUTER_TEST_PORT` | tests | throwaway router ports (17448, 17460) |
+| `FLEETLINK_HARNESS_PORT`, `FLEETLINK_HARNESS_DOMAIN`, `FLEETLINK_HARNESS_KEEP_LOGS`, `FLEETLINK_HARNESS_RUST_LOG`, `FLEETLINK_STALL_S`, `FLEETLINK_RESUME_S`, `FLEETLINK_THROTTLE_BPS` | tests | fault-harness ports, domains, logs and fault sizes |
+| `FLEETLINK_PENN_MAP`, `FLEETLINK_REAL_DSG`, `FLEETLINK_LC_RUN`, `PGMO_DEFORM_HARNESS`, `AGENTIC_NAV_SRC` | tests | real data for the data-driven tests (skipped when unset) |
+
+fleetlink does not read `ADT4_FLEET_LINK`: the mode is whatever the launcher starts and
+whatever `zenoh_connect` points at.
 
 ## Design
 
@@ -25,8 +131,8 @@ plus its *Deviations → fleetlink* section.
 
 * **`codec.py`.** The shared wire format: msgpack + zstd envelopes
   `{v, robot, stream, seq, epoch, t, p}`, compact columnar node records, graph deltas, and mesh
-  tiles (faces bucketed into 8 m cubes, vertices quantised to 1 cm int16). The browser decoder
-  `adt4_console/frontend/src/codec.ts` mirrors it.
+  tiles (faces bucketed into 8 m cubes, vertices quantised to 1 cm int16). Consumers import it
+  (`from fleetlink import codec`); the ADT4 web console's browser decoder mirrors it.
 * **`media.py`.** Occupancy-grid, path and camera-frame payloads: zlib grids, ≤150-point paths,
   and frame conversion to JPEG (OpenCV) or PNG (numpy + zlib).
 * **`video.py`.** Live camera video (C5). `VideoStreams` runs one encoder per requested camera:
@@ -43,7 +149,7 @@ plus its *Deviations → fleetlink* section.
   `AgentNode` is the rclpy wrapper: it decodes DSGs on a worker thread (newest only), ticks on
   its own thread, looks up the pose in the DSG frame, and transforms paths into that frame.
   At `frame_align_hz` it also looks up `global_frame` (default `map`) <- the DSG frame (e.g.
-  `map -> hamilton/odom`, published by hydra_multi / ROMAN relocalization) and sends it in the
+  `map -> robot3/odom`, published by hydra_multi / ROMAN relocalization) and sends it in the
   C1 state as `frame_align {parent, child, T: [x, y, z, qw, qx, qy, qz], stamp, ok, reason, age_s}`
   (`ok: false`, `T: null` and a `reason` when the lookup fails, i.e. not relocalized; `stamp` 0 =
   static TF). Everything else stays in its native frame; the console applies the transform.
@@ -68,7 +174,7 @@ plus its *Deviations → fleetlink* section.
   `link()` as `loss` / `lost`) and RTT to the agent's auto mode.
 * **`transport.py`.** `ZenohTransport` maps the classes to zenoh priority and reliability; every
   class is congestion-control **DROP** (a must-deliver message on a congested radio stalls the
-  whole zenoh transport and then closes it, zenoh #1876), and reliability is the application's
+  whole zenoh transport and then closes it, eclipse-zenoh/zenoh#1876), and reliability is the application's
   job (C0 retry, C2 `resend`/resync, C3 manifest). It is a zenoh *client* (a router does not
   forward between peers) that never fails for want of a router: zenoh 1.8 cannot open a client
   session without one, so a failed open is retried on a background thread (puts dropped and
@@ -139,11 +245,11 @@ Hydra's image-store tailer) and, **only while sending is on**, sends each new se
 identity `anchor_T_body` (+ kept object observation frames, with their observations and node
 binding) | `all` = every keyframe)
 encoded with `fleetlink.image_transfer.encode_frame` (`store_compression`: `none` | `lossless` |
-`fast`) within the C6 budget. The console's receiver writes them into
-`<live_store_root>/<robot>/<store_id>/image_store` (default `~/adt4_output/live/...`), a valid store
-SAM3 can search. The base tells the agent its watermark (C0 `store {id, after}`) on first contact,
+`fast`) within the C6 budget. The base's `StoreMirror` writes them into
+`<live_store_root>/<robot>/<store_id>/image_store`, a valid store that
+`hydra_python.image_store` (and SAM3 search on top of it) can read. The base tells the agent its watermark (C0 `store {id, after}`) on first contact,
 after an agent restart and after a gap, so nothing is lost or duplicated across restarts; a new
-run or Hydra session (`indexer.tail.session`) starts a new mirror directory. Protocol details: console API.md §13.
+run or Hydra session (`indexer.tail.session`) starts a new mirror directory. Protocol details: ADT4 console API.md §13.
 On a Penn-bag run (`fast`): 64 kB per keyframe, 115 keyframes mirrored at ~61 kB/s.
 
 **Needs the store's tail (live) mode.** The tailer is Hydra PR #221, which is not on Hydra
@@ -153,14 +259,14 @@ pack/unpack included) works on `develop`.
 
 **Off by default.** The mirror is what fills the radio (5 robots need ~10 Mbit/s with it on), so
 the agent starts with sending off (`store_send: false`). The store is still tailed and armed, so
-the state shows the backlog. The console's Live link panel has an "Image store" switch per robot
-(C0 `store_send {enable}`). The receiver remembers it and asks again when the robot's state
+the state shows the backlog. The base turns it on per robot with C0 `store_send {enable}` (the ADT4 console's Live link
+panel has a switch). The receiver remembers it and asks again when the robot's state
 disagrees, e.g. after an agent restart. Turning it off drops queued C6 frames and steps the cursor back
 to the last frame sent, so turning it on again continues the chain with nothing lost.
 
 ### Image-store codec and prior-map pack / unpack
 
-`fleetlink/image_transfer.py` (moved from the old `hydra_image_store.transfer`) encodes one store frame
+`fleetlink/image_transfer.py` encodes one store frame
 (row, calibration, RGB, depth) as a self-describing blob: `b"HISF"`, version byte, JSON header,
 payloads. It needs `zstandard` (`lossless` / `fast`) and cv2 or Pillow; a missing one raises
 `image_transfer.MissingDependency`. Hydra's `hydra_python.image_store` stays the store reader and writer.
@@ -177,20 +283,20 @@ full resolution, keeps safe source-relative paths, and otherwise names files lik
 timestamps must be integers and every path must resolve inside the destination store
 (`image_transfer.UnsafeFrame` otherwise).
 
-`fleetlink/image_pack.py` (moved from the old `hydra_image_store.pack`) packs a run's store into one tar
+`fleetlink/image_pack.py` packs a run's store into one tar
 (optionally zstd-wrapped): `manifest.json`, `frames/<id>.hisf`, kept mask PNGs, then a
 `store.sqlite` snapshot with every row (paths of frames not shipped are NULL, as after `gc`).
 `unpack` builds `DEST/image_store.partial`, runs `hydra_python.image_store.check_store` and only then
-renames it to `DEST/image_store`. The console's Maps -> Transfer streams one into the other:
+renames it to `DEST/image_store`. A map transfer streams one into the other:
 
 ```
 python -m fleetlink.image_pack pack RUN_DIR OUT.tar[.zst]|- [--frames keyframes|all]
        [--compression none|lossless|fast] [--zstd-level N] [--no-masks] [--quiet]
 python -m fleetlink.image_pack unpack ARCHIVE|- DEST_RUN_DIR [--overwrite] [--no-check] [--dsg dsg.json]
-hydra-image-store check DEST_RUN_DIR              # the same checks, standalone
+python -m hydra_python.image_store check DEST_RUN_DIR   # the same checks, standalone
 ```
 
-(`fleetlink-image-pack` once fleetlink is installed.) Python: `pack_store(run, out_path_or_file, ...)`,
+(`fleetlink-image-pack` is the installed command.) Python: `pack_store(run, out_path_or_file, ...)`,
 `unpack_store(path_or_stream, dest, ...)`. A corrupt or truncated archive is reported as
 `unpack failed: ...` (exit 1).
 
@@ -203,7 +309,7 @@ query or C5 video request wanted them within `camera_idle_s` (15 s), then releas
 ### Live video (C5)
 
 The base sends the C0 op `video {camera, enable, fps, kbps, width, codec}` and repeats it at
-least every 6 s (`video_keepalive_s`); the console does that every 2 s while a browser watches.
+least every 6 s (`video_keepalive_s`); the ADT4 console does that every 2 s while a browser watches.
 fps 0.5–15 (default 5), kbps 50–2000 kilobits/s (default 300), width default 640 (never upscaled,
 aspect kept, even), codec `h264` (default), `vp8` or `jpeg`. Changed parameters restart the
 encoder, which starts with a key frame. Key frames come every 2 s (`-g 2*fps`). Frames are sampled
@@ -224,7 +330,8 @@ for 20 ms instead of waiting for the next AUD) and about 10 ms for vp8.
 
 ## Parameters
 
-`fleetlink/config/fleetlink.yaml` holds the defaults. Pass another file with `-p config:=FILE`.
+The built-in defaults (`agent.DEFAULT_CONFIG`) are listed in `config/fleetlink.yaml` (installed
+to `share/fleetlink/config/`). Pass a file overriding any of them with `-p config:=FILE`.
 
 | key | default | |
 |---|---|---|
@@ -237,7 +344,7 @@ for 20 ms instead of waiting for the next AUD) and about 10 ms for vp8.
 | `mesh_period_s`, `manifest_period_s` | 5.0, 5.0 | |
 | `mesh_decimate_cell` | 0.4 | vertex-clustering cell (m) of the `decimated` mesh LOD; divides `tile_size` |
 | `tile_size` | 8.0 | m |
-| `mesh_source` | `dsg` | `odometric`: tile Hydra's odometric mesh deltas and send the deformation graph's optimized poses; the base deforms the mesh, so a loop closure costs ~10 kB instead of re-sending most tiles (`docs/MESH_DEFORMATION_DESIGN.md`). Default from `ADT4_FLEETLINK_MESH_SOURCE`. Topics: `mesh_delta_topic`, `mesh_graph_incremental_topic`, `mesh_graph_topic` (Hydra's `hydra/frontend/full_mesh_update`, `hydra/frontend/mesh_graph_incremental`, `hydra/backend/mesh_graph`) |
+| `mesh_source` | `dsg` | `odometric`: tile Hydra's odometric mesh deltas and send the deformation graph's optimized poses; the base deforms the mesh, so a loop closure costs ~10 kB instead of re-sending most tiles ([`docs/mesh_deformation.md`](docs/mesh_deformation.md)). Default from `$ADT4_FLEETLINK_MESH_SOURCE`. Topics: `mesh_delta_topic`, `mesh_graph_incremental_topic`, `mesh_graph_topic` (Hydra's `hydra/frontend/full_mesh_update`, `hydra/frontend/mesh_graph_incremental`, `hydra/backend/mesh_graph`) |
 | `max_msg_bytes` | 65536 | largest C2 message |
 | `burst_s` | 1.0 | token-bucket depth, in seconds of budget |
 | `grid_period_s` | 5.0 | occupancy grid check period |
@@ -270,26 +377,19 @@ endpoint or a comma-separated list, retried forever, so the agent starts fine be
 and `cameras` (list of `name=topic`, default
 `[rgb=<robot>_zed/rgb/image_rect_color, overlay=semantic_overlay/image_raw]`).
 
-Run it on a robot as the generated sessions do:
-
-```bash
-fleetlink/bin/fleetlink-agent --ros-args -r __ns:=/euclid -p robot_name:=euclid -p use_sim_time:=true
-```
-
-`bin/fleetlink-agent` re-executes itself in `$ADT4_ENV/spark_env`, which has `eclipse-zenoh`
-pinned to rmw_zenoh's zenoh version: `eclipse-zenoh==1.8.0` in `install/spark_requirements.txt`
-(rmw_zenoh 0.2.11 / zenoh-c 1.8). The agent logs a warning at startup when the installed
-version is not 1.8.x. It also logs which `spark_dsg` it imported and reports DSG decoding
-in `state.stats.dsg` (received / processed / failed, node counts, and a `warning` when a payload
-that has nodes decodes to none, e.g. a stale spark_dsg shadowing the workspace build). Budgets can also be changed live from the console's
-Live link tab (`POST /api/live/{r}/budget`).
+The agent logs a warning at startup when the installed eclipse-zenoh is not 1.8.x (the zenoh
+of rmw_zenoh 0.2.x). It also logs which `spark_dsg` it imported and reports DSG decoding in
+`state.stats.dsg` (received / processed / failed, node counts, and a `warning` when a payload
+that has nodes decodes to none, e.g. a stale spark_dsg shadowing the workspace build). Budgets
+can also be changed live by the base (C0 `budget`).
 
 ## Generic ROS relay (fleetlink mode)
 
 In fleetlink mode each robot's ROS graph stays on the robot, and the ROS topics, services and
-transforms that must cross the radio are relayed by fleetlink. They are listed in
-[`config/relay.yaml`](config/relay.yaml), whose header documents the schema. Both ends load the
-same file.
+transforms that must cross the radio are relayed by fleetlink. They are listed in a relay
+table that the deployment provides (`relay_config`); [`config/relay.example.yaml`](config/relay.example.yaml)
+documents the schema. Both ends load the same file (the heartbeat compares hashes). Relayed
+message types that are not installed on a machine are skipped with a warning.
 
 * **`relay.py`** (pure, no ROS). `RelayConfig` validates the table: it rejects unknown keys,
   modes, directions or classes, a topic or service configured in **both** directions (the loop
@@ -325,9 +425,18 @@ same file.
   The heartbeat carries the config hash, and a mismatch is logged and shown as
   `cfg_match: false`. Everything is congestion-control DROP. Relay messages do not go through
   the agent's scheduler; `rate_hz` is their only budget.
+
+  **Large messages are relayed in parts.** In the acked modes a message over `chunk_bytes`
+  (16 kB) goes as parts `{..., id, part, parts, data}`, at most `chunk_window` (6)
+  unacknowledged at a time, so a few hundred kB never overflows zenoh's 128 kB per-priority
+  queue (which drops a message that does not fit whole). The receiver acks each part
+  (`pack`), reassembles the message and handles it as one (type, ttl, order, the usual
+  `ack`). The sender resends only unacked parts: on a timer paced by the part acks (at least
+  `retry_s`, doubled on a timeout without progress, at most 8 s), or at once when a later part
+  is acked first. `latest` (fire and forget) is never split.
 * **`relay_ros.py`.** `RobotRelay` runs inside `fleetlink-agent` on the agent's transport. It
-  is enabled with `-p relay_config:=<relay.yaml>` (or `default`), plus optional
-  `relay_platform` and `topology`. Without `relay_config` the agent behaves as before. It
+  is enabled with `-p relay_config:=<relay.yaml>`, plus optional `relay_platform` and
+  `topology`. Without `relay_config` the agent behaves as before. It
   subscribes the `up` topics with `raw=True` and the configured QoS, republishes `down` topics,
   and looks up each configured TF pair (`map → {robot}/base_link`, 5 Hz) in a tf2 buffer.
   `/tf_static` transforms under `frames_prefix` are sent as one message when they change and
@@ -337,20 +446,20 @@ same file.
   `BaseBridge` is the `fleetlink-bridge` node, one process for every robot:
 
   ```bash
-  fleetlink/bin/fleetlink-bridge --ros-args -p zenoh_connect:=tcp/127.0.0.1:7450 \
-      -p topology:=<topology.yaml> -p relay_config:=<relay.yaml> [-p base_name:=willow] [-p robots:=euclid,hamilton]
+  ros2 run fleetlink fleetlink-bridge --ros-args -p zenoh_connect:=tcp/127.0.0.1:7450 \
+      -p topology:=<topology.yaml> -p relay_config:=<relay.yaml> [-p base_name:=base1] [-p robots:=robot1,robot3]
   ```
 
   Robots come from the topology (`role: robot`) and from any relay heartbeat that arrives. On
   the base graph the bridge subscribes the `down` topics and republishes `up` topics under the
   same names. Transforms go to `/tf`; static transforms go to `/tf_static`, all robots in one
   latched message. The bridge serves proxies for `dir: down` services and calls the real base
-  servers (`base_name`, e.g. heracles' `/{base}/update_holding_state`) for `dir: up` ones. It
+  servers (`base_name`, e.g. `/{base}/update_holding_state`) for `dir: up` ones. It
   publishes `/fleetlink/link_status`: one `std_msgs/String` JSON per robot, at 1 Hz and right
   after a down message is acked. The JSON is `RelayCore.status()`: `connected`, `rtt`, `loss`,
   `last_seen`, `clock_offset`, `epoch`, `peer_epoch`, `cfg_match`, and per topic `sent`,
   `acked`, `pending` and `subs`, the subscribers on the far side when the message was applied.
-  The console takes Pause/Resume delivery and robot liveness from this topic. ROS subscriber
+  A base UI can take delivery acks and robot liveness from this topic. ROS subscriber
   counts mean nothing once the bridge subscribes everything. Both ends spin multi-threaded
   (`relay_ros.make_executor()`, 8 threads): proxy servers block in a reentrant group while
   the far side answers. At most 2 relayed calls per end wait at once (`MAX_PROXY_CALLS`);
@@ -359,91 +468,80 @@ same file.
   need. Service clients and publishers are created on the executor thread or before it spins,
   never on zenoh's callback thread.
 
-Inventory notes (`dcist_launch_system/scripts/fleetlink_inventory.py`):
-* Nothing on the robot subscribes to `spot_executor_node/pause|resume` yet. They are relayed
-  anyway, and the ack's `subs: 0` shows it.
-* `omniplanner_node/llm_response` is not relayed (it is base-local).
-* `/global/ros_system_monitor/table_in` is one global topic for all robots.
+## Router modes
 
-## Fleetlink mode
+A deployment chooses how the robots and the base talk; fleetlink works in both:
 
-`network_diagnostics/config/topology.yaml` picks how robots and the base station talk:
+* **router**: the base's ROS `rmw_zenohd` links router-to-router to every robot, so all ROS
+  graphs merge across the radio. Each agent connects to its local ROS router
+  (`tcp/127.0.0.1:7447`) and the relay is off.
+* **fleetlink**: only fleetlink crosses the radio, and every ROS graph stays on its machine.
+  * The base runs a dedicated zenoh router, `fleetlink-router [PORT]`: `rmw_zenohd` with
+    [`config/fleetlink_router.json5`](config/fleetlink_router.json5) (listen `tcp/[::]:7450`,
+    connect to nothing, no scouting, gossip, adminspace or plugins, and 16-batch data queues,
+    see `transport.py` above). It refuses 7447, the ROS router's port.
+  * The base's `fleetlink-bridge` and receiver connect to it over loopback.
+  * Each robot's agent connects to it as a zenoh client over the radio (`zenoh_connect`, one
+    endpoint per network) and runs the ROS relay (`relay_config`).
+  * The machines' own ROS routers must not dial each other (e.g.
+    `ZENOH_CONFIG_OVERRIDE='connect/endpoints=[]'`).
+
+**Topology.** The bridge (and, for the platform, the agent) read a topology YAML: every
+`machines.<name>` with `role: robot` is a robot, its `platform_type` (`spot` when missing,
+`husky` = `phoenix`) selects relay rows, and `fleet_defaults.fleetlink_base` names the base:
 
 ```yaml
-zenoh:
-  port: 7447                              # every machine's own ROS rmw_zenohd
-  fleetlink_port: 7450                    # the base's fleetlink router
-  fleetlink_networks: [silvus, mit_wifi]  # robot agents try these in order
+machines:
+  robot1: {role: robot, platform_type: spot}
+  robot2: {role: robot, platform_type: husky}
+  base1: {role: base_station}
 fleet_defaults:
-  fleet_link: router      # router | fleetlink
-  fleetlink_base: willow  # base station that runs the fleetlink router
+  fleetlink_base: base1
 ```
 
-* **`router`** (the default). The base's `rmw_zenohd` connects router-to-router to every
-  robot (the endpoints the fleet tools deploy), so all ROS graphs merge across the radio,
-  exactly as before fleetlink existed. The `fleetlink` / `fleetlink_base` windows of the
-  generated sessions start nothing and only print a message.
-* **`fleetlink`** (opt-in: `fleet_link: fleetlink` in the topology, or
-  `export ADT4_FLEET_LINK=fleetlink` before `run-adt4`). Only fleetlink crosses the radio, and
-  every ROS graph stays on its machine.
-  * `generate_zenoh_endpoints()` returns `[]` for every machine, so a zenoh deploy (fleet TUI,
-    `fleet-adt4 zenoh`, the launch workflow's phase 0, the console's *Deploy config*) clears
-    the base router's robot links.
-  * On the base, the `fleetlink_base` window of the `base_station*` sessions starts
-    `bin/fleetlink-router` and `fleetlink-bridge`. In router mode both panes only print a
-    message.
-    * `bin/fleetlink-router [PORT]` runs `rmw_zenohd` with
-      [`config/fleetlink_router.json5`](config/fleetlink_router.json5): listen
-      `tcp/[::]:7450`, connect to nothing, no scouting, gossip, adminspace or plugins, and
-      16-batch data queues (see `transport.py` above).
-    * The bridge and the console's receiver connect to it over loopback. The console's
-      `--zenoh-connect` defaults to `tcp/127.0.0.1:<fleetlink_port>` when
-      `ADT4_FLEET_LINK=fleetlink`.
-  * On each robot, the `fleetlink` window of the mapping sessions (`spot*`, `phoenix*`) starts
-    the agent, which connects to the fleetlink router as a zenoh client over the radio and runs
-    the ROS relay (`-p relay_config:=default`).
-  * `run-adt4` starts the local `rmw_zenohd` with `ZENOH_CONFIG_OVERRIDE='connect/endpoints=[]'`,
-    so it dials no other machine even when `ZENOH_ROUTER_CONFIG_URI` points at a fleet config.
+It is the `topology` parameter, else `$ADT4_TOPOLOGY`, else `config/topology.yaml` in the share
+directory of an installed ADT4 `dcist_launch_system` (when it ships one). fleetlink reads no
+addresses from it; endpoints are always passed in (`zenoh_connect`).
 
-**Environment.** `run-adt4` derives these from the topology unless they are already set
-(`python -m dcist_launch_system.fleet_env <machine> [--network NAME]` prints them as shell
-exports). Problems such as an unknown machine, or a base with no address on any fleetlink
-network, fall back to router mode with a warning and never fail the launch. The fleet launch
-workflow passes the launching machine's view of the topology to each `run-adt4` on the
-command line.
-
-| variable | robot (fleetlink) | base (fleetlink) | router mode |
-|---|---|---|---|
-| `ADT4_FLEET_LINK` | `fleetlink` | `fleetlink` | `router` |
-| `ADT4_FLEETLINK_CONNECT` | `tcp/<base silvus>:7450,tcp/<base mit_wifi>:7450` | `tcp/127.0.0.1:7450` | `tcp/127.0.0.1:7447` |
-| `ADT4_FLEETLINK_PORT` | `7450` | `7450` | `7450` |
-
-**Failover across networks.** The agent gets all of the base's fleetlink endpoints, in
-`fleetlink_networks` order, verified on zenoh 1.8 (`tests/test_fleetlink_router.py`):
+**Failover across networks.** Give the agent all of the base's fleetlink endpoints, in order of
+preference. Verified on zenoh 1.8 (`tests/test_fleetlink_router.py`):
 
 * A zenoh *client* opens **one** session, to the first endpoint that answers. When two
   endpoints reach the same router, there is one TCP link and each message arrives once.
 * When that link drops, the client reconnects to the first endpoint that answers again.
-* It does **not** fail back: once on Wi-Fi, it stays there until that link drops.
+* It does **not** fail back: once on the second network, it stays there until that link drops.
 * A refused endpoint (router down) is skipped at once. A black-holed one (radio out of range)
-  costs zenoh's `transport/unicast/open_timeout` (10 s by default) before the next one is
-  tried.
+  costs zenoh's `transport/unicast/open_timeout` before the next one is tried.
 
-**Switching.** Set `fleet_defaults.fleet_link`, redeploy the zenoh config (in fleetlink mode
-this clears the base router's robot endpoints; back in router mode it restores them), and
-restart the sessions. To force one machine's mode, export `ADT4_FLEET_LINK` before
-`run-adt4`; the other variables are then derived for that mode. Export
-`ADT4_FLEETLINK_CONNECT` as well to point a robot elsewhere, such as a bench base.
+**In ADT4** (Awesome-DCIST-T4), `topology.yaml`'s `fleet_defaults.fleet_link: router | fleetlink`
+picks the mode, `run-adt4` derives `ADT4_FLEET_LINK`, `ADT4_FLEETLINK_CONNECT` and
+`ADT4_FLEETLINK_PORT` from it, and the generated `fleetlink` / `fleetlink_base` tmux windows start
+the agent, the router and the bridge; ADT4 keeps its relay table in
+`dcist_launch_system/config/fleetlink/relay.yaml`.
 
-**Deferred.** Zenoh access control, so that a robot can only put `adt4/<self>/**`.
+Not done: zenoh access control, so that a robot can only put `adt4/<self>/**`.
 
-## Tests and benchmark
+## Tests
 
 ```bash
-cd fleetlink
-zsh -c 'source /opt/ros/jazzy/setup.zsh; source ~/dcist_ws/install/setup.zsh; \
-        $ADT4_ENV/spark_env/bin/python3 -m pytest -q'
+pip install -e '.[test]'          # or: numpy msgpack zstandard PyYAML pytest
+python -m pytest -q               # pure Python: what CI runs; ROS / zenoh tests skip
 ```
+
+With ROS 2 Jazzy, `rmw_zenoh_cpp`, eclipse-zenoh 1.8.0 and the workspace's message packages
+(`hydra_msgs`, `robot_executor_msgs`, `heracles_ros_interfaces`, `dcist_launch_system_msgs`,
+...) installed, the integration tests run too:
+
+```bash
+source /opt/ros/jazzy/setup.bash && source <workspace>/install/setup.bash
+python -m pytest -q               # with the interpreter that has eclipse-zenoh
+python -m pytest -q -m "not integration"   # unit tests only
+```
+
+`pyproject.toml` puts the checkout and `tests/` on the path and disables ROS's
+`launch_testing` pytest plugins (they end the session at the first module-level skip).
+Every integration test uses throwaway routers on free local ports and private ROS domains and
+never touches a router on 7447; each skips when ROS, zenoh or its port is unavailable.
 
 * `test_codec`, `test_scheduler`, `test_transport`, `test_agent`, `test_receiver`, `test_media`,
   `test_video` are unit tests. `test_reliability` runs agent + receiver over the emulator with
@@ -453,55 +551,39 @@ zsh -c 'source /opt/ros/jazzy/setup.zsh; source ~/dcist_ws/install/setup.zsh; \
   key-frame flags, bitrate within 30 % of target, decodable output) and skips them when ffmpeg
   lacks libx264 / libvpx. They use the `RecordingTransport` and the deterministic `LinkEmulator`
   (latency, bandwidth, loss, congestion, C4 query timeouts and budget).
-* `test_zenoh_smoke` (graph, mesh, C0, camera query, grid, paths, live h264 video) and `test_ros_smoke` (a real
-  `hydra_ros.DsgPublisher` plus OccupancyGrid/Path/MarkerArray/Image publishers into `AgentNode`)
-  start a **throwaway** `rmw_zenohd` on `127.0.0.1:17448` (`FLEETLINK_TEST_PORT` moves it) and
-  use private ROS domains (88, 89).
-  `test_zenoh_open_without_router_then_connect_and_restart` opens the sessions with nothing on
-  the next port (17449), then starts a router there, kills and restarts it.
-  They never touch the live router on 7447. They skip when ROS or that port is unavailable.
-* `test_relay` exercises `RelayConfig` / `RelayCore` over the emulator. It covers config
-  rejection (both directions, unknown mode/key/class) and the platform filter on the real
-  `relay.yaml`; reliable order under 30 % loss and the queue cap; latest_reliable supersede; the
-  latest rate limit; TTL with a 100 s clock skew and expiry, and with a ±45 s skew before
-  the offset is known (and after a peer restart); no replay after a robot restart (with the
-  stale-epoch reject); replay to a restarted base (state yes, an acked result no, a pending
-  result exactly once, also when its stale-epoch nack is what reveals the restart); type and
-  config hash mismatch; service round trips both ways under loss; and service timeouts. `test_relay_ros` runs a
-  robot graph (domain 90) with `AgentNode` + `relay_config` and a base graph (domain 91) with
-  `BaseBridge`, joined only through the throwaway router. Over that link it checks an
-  ActionSequenceMsg down, an `action_result` up, `save_dsg` base→robot, `update_holding_state`
-  robot→`/willow/…`, a base-side tf2 lookup of the composed and static frames, and
-  `/fleetlink/link_status`. It also checks that the two graphs never see each other, and that
-  during a dropout excess relayed calls fail at once while the agent's callbacks and C1 go on.
-  Mark: `integration`; `-m "not integration"` skips them.
-* `test_fleet_harness` runs fleetlink mode on its real topology, every part a separate process
-  (`tests/harness.py`):
-  * a base `rmw_zenohd`, `bin/fleetlink-router`, and two robot `rmw_zenohd`, on ports
-    17470-17477 and ROS domains 94-96;
-  * a real `fleetlink-agent` per robot (relay on) and a real `fleetlink-bridge`;
-  * fake robot and base nodes (`tests/harness_nodes/node_host.py`);
-  * a `FaultProxy` on each robot's link that can stall, throttle or reset it.
-
-  It checks graph isolation (ROS graph API and liveliness tokens) and the per-robot relay round
-  trips. It runs a 30 kB/s link saturated by ~64 kB grids, where every grid and a ~28 kB C4
-  camera reply arrive and commands still take under 2 s, a stall
-  (`FLEETLINK_STALL_S`, 20 s by default, 60 s per the plan) with no #1876 close, C1 back within
-  `FLEETLINK_RESUME_S` and the other robot unaffected, and a fleetlink router kill -9 mid-plan
-  with no re-execution. About 50 s in all. Teardown kills every process group and checks that
-  none is left. The bench checklist is [`docs/bench_cutover.md`](docs/bench_cutover.md).
-* **Benchmark:** `test_integration_pennovation.py` streams the real Pennovation map
-  (`FLEETLINK_PENN_MAP`, default `~/data/pennovation_2025/courtyard-alleyways/output/hydra/backend/dsg_with_mesh.json`)
-  over an emulated 2 Mbit/s, 150 ms, 3 % loss link. The map is revealed in 20 stages along the
-  recorded trajectory, like a robot mapping. The test asserts graph convergence ≤ 60 s after the
-  last reveal, full mesh ≤ 600 s, C1 staleness < 1 s, and budget compliance, and prints the
-  bandwidth and latency figures:
-
-  ```bash
-  python3 -m pytest -q -s tests/test_integration_pennovation.py
-  ```
-
-  It is deterministic: same seed, same numbers. It skips when the map file is missing.
+* `test_zenoh_smoke` (graph, mesh, C0, camera query, grid, paths, live h264 video) and
+  `test_ros_smoke` (a real `hydra_ros.DsgPublisher` plus OccupancyGrid/Path/MarkerArray/Image
+  publishers into `AgentNode`) start a throwaway `rmw_zenohd` on `127.0.0.1:17448`
+  (`FLEETLINK_TEST_PORT` moves it; the late-router tests use the next port) and private ROS
+  domains (88, 89).
+* `test_relay` exercises `RelayConfig` / `RelayCore` over the emulator: config rejection, the
+  platform filter, reliable order under 30 % loss and the queue cap, latest_reliable
+  supersede, the latest rate limit, TTL with clock skew before and after the offset is known,
+  no replay after a robot restart, replay to a restarted base, type and config hash mismatch,
+  service round trips and timeouts. `test_relay_chunks` covers messages relayed in parts.
+  `test_relay_ros` runs a robot graph (domain 90) with `AgentNode` + `relay_config` and a base
+  graph (domain 91) with `BaseBridge`, joined only through a throwaway router, with
+  `tests/data/relay_test.yaml`.
+* `test_fleetlink_router` starts `scripts/fleetlink-router` on ports 17460/17461
+  (`FLEETLINK_ROUTER_TEST_PORT`) and pins the zenoh client failover behaviour.
+* `test_fleet_harness` is the **multi-router fault harness**: fleetlink mode with every part a
+  separate process (`tests/harness.py`): a base `rmw_zenohd`, the fleetlink router and two robot
+  `rmw_zenohd` on ports 17470-17477 (`FLEETLINK_HARNESS_PORT`) and ROS domains 94-96
+  (`FLEETLINK_HARNESS_DOMAIN`), a real agent per robot (relay on) and a real bridge, fake robot
+  and base nodes (`tests/harness_nodes/node_host.py`), and a `FaultProxy` on each robot's link
+  that can stall, throttle or reset it. It checks graph isolation and the per-robot relay round
+  trips, a 30 kB/s link saturated by ~64 kB grids (every grid and a ~28 kB camera reply arrive,
+  commands still take under 2 s), a stall (`FLEETLINK_STALL_S`, 20 s by default) with no
+  transport close, C1 back within `FLEETLINK_RESUME_S` and the other robot unaffected, and a
+  fleetlink router kill -9 mid-plan with no re-execution. About 50 s in all; teardown kills every
+  process group and checks that none is left.
+* Data-driven tests run only when pointed at real Hydra outputs: `test_integration_pennovation`
+  (`FLEETLINK_PENN_MAP`, a `dsg_with_mesh.json`; streams it over an emulated 2 Mbit/s, 150 ms,
+  3 % loss link in 20 reveal stages and asserts graph convergence ≤ 60 s, full mesh ≤ 600 s,
+  C1 staleness < 1 s and budget compliance; deterministic), `test_dsg_decode`
+  (`FLEETLINK_REAL_DSG`), `test_mesh_deform_e2e` and the Kimera-PGMO ground truth in
+  `test_deform` (`FLEETLINK_LC_RUN`, `PGMO_DEFORM_HARNESS`), and the SAM3 keyframe-loader check in
+  `test_store_mirror` (`AGENTIC_NAV_SRC`). The image-store tests need `hydra_python.image_store`.
 
 ## Mesh level of detail
 
@@ -522,3 +604,7 @@ for `decimated` when its epoch starts (`Receiver(mesh_lod=...)`, None = never as
 console's choice (`set_mesh_lod`) to a restarted robot. Compatibility: a robot sends full tiles until
 a base asks (an old base never does); an old robot answers the unknown op with an error ack and keeps
 sending full tiles (the link status `mesh.lod` is then null).
+
+## License
+
+Apache License 2.0, see [LICENSE](LICENSE). Copyright 2026 Harel Biggie.

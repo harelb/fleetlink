@@ -1,5 +1,5 @@
 """Payload helpers for the RViz-replacement streams: occupancy grid, executor
-paths, and on-demand camera frames (API.md §11).
+paths, and on-demand camera frames (ADT4 console API.md §11).
 
 Pure numpy / zlib / msgpack.  cv2 is used for resizing and JPEG when it can be
 imported; otherwise frames are encoded as PNG with numpy + zlib.

@@ -1,4 +1,4 @@
-"""Mosaic video (the console's "All cameras" grid, API.md §12): several cameras
+"""Mosaic video (the console's "All cameras" grid, ADT4 console API.md §12): several cameras
 tiled into one picture and one encoder, the tile layout in every frame, lazy
 camera wants, the budget split and the cheap scaler."""
 

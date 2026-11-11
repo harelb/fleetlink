@@ -67,7 +67,7 @@ DEFAULT_CONFIG = {
     "budget_max": {"C2": 500_000, "C3": 1_000_000},
     "total_bps": None,
     "auto": False,
-    "state_hz": 4.0,  # 2 Hz cannot keep C1 staleness < 1 s at 3 % loss (see API.md Deviations)
+    "state_hz": 4.0,  # 2 Hz cannot keep C1 staleness < 1 s at 3 % loss (see ADT4 console API.md Deviations)
     "c2_hz": 1.0,
     "mesh_period_s": 5.0,
     # "dsg": tile the deformed mesh from the DSG (a loop closure re-sends the

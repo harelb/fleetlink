@@ -1,4 +1,4 @@
-"""Live image-store mirror over fleetlink (class C6, API.md §13).
+"""Live image-store mirror over fleetlink (class C6, ADT4 console API.md §13).
 
 Robot side, :class:`StoreTail`: tails the robot's image store (sqlite, WAL,
 opened read-only and never indexed from here).  Hydra/Khronos do not write it

@@ -1,12 +1,12 @@
 ---
-# fleetlink defaults (API.md §8). Budgets are BYTES per second.
+# fleetlink defaults (ADT4 console API.md §8). Budgets are BYTES per second.
 budgets:
   C1: 5000  # state (~340 B at 4 Hz ≈ 1.4 kB/s)
   C2: 50000  # graph deltas, 1 Hz tick
   C3: 100000  # mesh tiles + occupancy grid
   C4: 200000  # on-demand camera frames (request/reply)
-  C5: 400000  # live camera video, all streams together (API.md §12)
-  C6: 150000  # live image-store mirror, lowest priority (API.md §13)
+  C5: 400000  # live camera video, all streams together (ADT4 console API.md §12)
+  C6: 150000  # live image-store mirror, lowest priority (ADT4 console API.md §13)
 budget_min:  # auto (AIMD) mode never goes below / above these
   C2: 5000
   C3: 5000

@@ -1,4 +1,4 @@
-"""Base-station side of fleetlink (API.md §8).
+"""Base-station side of fleetlink (ADT4 console API.md §8).
 
 ``Receiver(transport, on_update)`` mirrors every robot's graph (``GraphState``)
 and mesh tiles, tracks link statistics, detects C2 sequence gaps and epoch

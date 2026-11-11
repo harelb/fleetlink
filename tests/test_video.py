@@ -1,4 +1,4 @@
-"""Live camera video (C5, API.md §12): bitstream parsing, ffmpeg encoders,
+"""Live camera video (C5, ADT4 console API.md §12): bitstream parsing, ffmpeg encoders,
 keepalive expiry, the C5 drop policy, the JPEG fallback and the receiver."""
 
 import importlib.util

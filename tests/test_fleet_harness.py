@@ -6,7 +6,7 @@ robot/base nodes, and a :class:`harness.FaultProxy` on each robot's radio link.
 One fleet per module (~3 s to start); the tests run in file order and each
 leaves the fleet healthy.  Knobs (environment):
 
-* ``FLEETLINK_STALL_S`` (20): radio stall length; the plan's figure is 60.
+* ``FLEETLINK_STALL_S`` (20): radio stall length; a field acceptance run uses 60.
 * ``FLEETLINK_RESUME_S`` (3.0): bound on C1 state resuming after the stall.
 * ``FLEETLINK_THROTTLE_BPS`` (30000): throttled radio rate, bytes/s.
 * ``FLEETLINK_HARNESS_PORT`` (17470) / ``FLEETLINK_HARNESS_DOMAIN`` (94): first

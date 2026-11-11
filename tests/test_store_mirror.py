@@ -1,4 +1,4 @@
-"""C6 live image-store mirror: robot store -> fleetlink -> base store (API.md §13).
+"""C6 live image-store mirror: robot store -> fleetlink -> base store (ADT4 console API.md §13).
 
 Exercises the real hydra_python.image_store writer and the fleetlink.image_transfer
 codec (skipped without hydra_python.image_store): resume across agent and console

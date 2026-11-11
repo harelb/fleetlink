@@ -2,9 +2,9 @@
 link emulator (bandwidth / latency / loss / bounded queues, virtual clock) for
 tests and benchmarks.
 
-Stream classes (API.md §8).  **Every class is congestion-control DROP**: a
+Stream classes (ADT4 console API.md §8).  **Every class is congestion-control DROP**: a
 must-deliver (BLOCK) message on a congested radio link stalls the whole zenoh
-transport and, after ``wait_before_close``, closes it (zenoh #1876).  Delivery
+transport and, after ``wait_before_close``, closes it (eclipse-zenoh/zenoh#1876).  Delivery
 guarantees live in the application instead: C0 requests are retried until
 acked, C2 gaps are repaired with ``resend`` from the agent's ring buffer (and a
 full resync as the last resort), C3 tiles through the manifest.
@@ -14,8 +14,8 @@ full resync as the last resort), C3 tiles through the manifest.
 * ``C2`` graph    - DATA_HIGH, DROP, reliable
 * ``C3`` mesh     - DATA_LOW, DROP, best effort
 * ``C4`` media    - DATA, DROP, request/reply only (on-demand camera frames)
-* ``C5`` video    - DATA_LOW, DROP, best effort (live camera video, API.md §12)
-* ``C6`` store    - BACKGROUND, DROP, reliable (live image-store mirror, API.md §13;
+* ``C5`` video    - DATA_LOW, DROP, best effort (live camera video, ADT4 console API.md §12)
+* ``C6`` store    - BACKGROUND, DROP, reliable (live image-store mirror, ADT4 console API.md §13;
   lowest priority, gaps repaired by the base's watermark requests)
 
 Request/reply (``declare_queryable`` / ``query``) carries C4: the base asks,
@@ -765,7 +765,7 @@ class LinkEmulator:
         return self.closed_until is not None and now < self.closed_until
 
     def close_transport(self, duration_s: float) -> None:
-        """Emulate a zenoh transport close (lease expiry / #1876): everything
+        """Emulate a zenoh transport close (lease expiry / eclipse-zenoh/zenoh#1876): everything
         queued or in flight in both directions is lost, and every put (and query)
         is dropped for ``duration_s``; then the link reopens by itself."""
         with self._lock:
