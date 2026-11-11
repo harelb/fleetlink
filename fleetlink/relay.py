@@ -100,6 +100,7 @@ TF_PREFIX = "/_tf"  # wire names of composed transforms: /_tf/<parent>/<child>
 TF_STATIC = "/_tf_static"
 
 _TOPIC_KEYS = {
+    "base_topic",
     "topic",
     "type",
     "dir",
@@ -161,6 +162,7 @@ class Entry:
     parent: str = ""
     child: str = ""
     frames_prefix: str = ""
+    base_topic: str = ""  # optional base-side publication name for up topics
 
 
 @dataclass
@@ -296,6 +298,12 @@ class RelayConfig:
                 raise self._err(f"{what}: missing {k!r}")
         if not str(t["topic"]).startswith("/"):
             raise self._err(f"{what}: topic must be absolute: {t['topic']!r}")
+        base_topic = t.get("base_topic", "")
+        if base_topic:
+            if t["dir"] != "up":
+                raise self._err(f"{what}: base_topic is only supported for dir: up")
+            if not isinstance(base_topic, str) or not base_topic.startswith("/"):
+                raise self._err(f"{what}: base_topic must be an absolute topic name")
         qos = dict(DEFAULT_QOS, **(t.get("qos") or {}))
         if qos["reliability"] not in ("reliable", "best_effort"):
             raise self._err(f"{what}: qos.reliability {qos['reliability']!r}")
@@ -311,6 +319,7 @@ class RelayConfig:
             raise self._err(f"{what}: ttl_strict is only for mode latest")
         return {
             "topic": str(t["topic"]),
+            "base_topic": base_topic,
             "type": str(t["type"]),
             "dir": t["dir"],
             "mode": mode,
@@ -403,6 +412,7 @@ class RelayConfig:
             topics[name] = Entry(
                 name=name,
                 topic=name,
+                base_topic=fmt(t["base_topic"]) if t["base_topic"] else "",
                 type=t["type"],
                 dir=t["dir"],
                 mode=t["mode"],
