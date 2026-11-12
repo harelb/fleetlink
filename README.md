@@ -15,7 +15,7 @@ fleetlink was written for [Awesome-DCIST-T4](https://github.com/MIT-SPARK/Awesom
 wire contract is documented in ADT4's console API (`adt4_console/docs/API.md` §8, §11-§13).
 
 * [Install](#install), [Run](#run), [Environment variables](#environment-variables), [Tests](#tests)
-* [Design](#design) and [stream classes](#stream-classes) (C0-C6)
+* [Design](#design) and [stream classes](#stream-classes) (C0-C7)
 * [Generic ROS relay](#generic-ros-relay-fleetlink-mode), incl. large messages relayed in parts
 * [Router modes](#router-modes): `router` and `fleetlink` (dedicated base router)
 * [Mesh level of detail](#mesh-level-of-detail), [mesh deformation](docs/mesh_deformation.md)
@@ -231,10 +231,26 @@ whatever `zenoh_connect` points at.
 | C4 media | queryable `media/camera/<name>` | DATA (request/reply) | DROP | 200 kB/s | camera frames on request (`?w=640;q=70`) | none (the caller retries) |
 | C5 video | `video/<name>` | DATA_LOW, best effort | DROP | 400 kB/s | live h264 / vp8 / jpeg frames while a `video` request is kept alive | none; a gap requests a key frame |
 | C6 store | `store/frame` | BACKGROUND, reliable | DROP | 150 kB/s | image-store frames (`{id, frame_id, prev, blob}`) of the live store mirror | `prev` chain; gap or lost tail → C0 `store {id, after: watermark}` rewinds the agent |
+| C7 events | `events` | BACKGROUND, best effort | DROP | 2 kB/s | live mission events: `{lines: [JSONL records], dropped}` batches (≤ 1.5 kB) of the robot's `events/*.jsonl` (goal / action / lease / loc / follow / phoenix / mission types) | none: the authoritative copy is collected after the mission; the robot drops the oldest first |
 
 Budgets are **bytes per second**. On the emulated link the transmit order is
-C0 > C1 > C2 > C4 > C3 > C5 > C6: an operator waiting for a frame outranks bulk mesh, but not the
-graph; the image-store mirror only uses what is left.
+C0 > C1 > C2 > C4 > C3 > C5 > C6 > C7: an operator waiting for a frame outranks bulk mesh, but not the
+graph; the image-store mirror only uses what is left, and the live mission events
+come last.
+
+### Mission event log (agent)
+
+With a run dir (`$ADT4_RUN_DIR`, set by `run-adt4`; or the `events_dir` param) the
+agent writes `events/fleetlink_agent.jsonl` (`fleetlink.mission_events`):
+`robot.pose` at 1 Hz, `loc.snapshot` every 10 s and on mission / lease / plan /
+action-result changes (map -> odom, body pose, ROMAN prior / self LCs, hydra_multi
+accepted LCs, `reloc_ok`), `loc.jump`, `guards` on change, phoenix
+`phoenix.progress` / `phoenix.guards`, `link.robot` every 30 s, and `mission.ack`
+when the latched `/global/mission/current` (the console's, relayed down) names a
+new mission; that id stamps every later event and is in the C1 state
+(`mission`, with `run` and `events` counters). The live C7 relay (`events_live`,
+on by default; budget `budget_C7`) also tails the run's other `events/*.jsonl`
+(spot_executor's).
 
 ### Live image-store mirror (C6)
 
