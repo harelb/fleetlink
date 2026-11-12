@@ -53,7 +53,7 @@ from fleetlink.transport import Transport, split_endpoints
 ZENOH_EXPECTED = "1.8"
 
 # budget classes reported in the state message (and adjustable from the console)
-CLASSES_REPORTED = ("C1", "C2", "C3", "C4", "C5", "C6")
+CLASSES_REPORTED = ("C1", "C2", "C3", "C4", "C5", "C6", "C7")
 
 DEFAULT_CONFIG = {
     "budgets": {  # bytes/s
@@ -62,7 +62,8 @@ DEFAULT_CONFIG = {
         "C3": 100_000,
         "C4": 200_000,
         "C5": 400_000,  # live video (all streams together)
-        "C6": 150_000,  # live image-store mirror (lowest priority)
+        "C6": 150_000,  # live image-store mirror
+        "C7": 2_000,  # live mission events (lowest priority; fleetlink.mission_events)
     },
     "budget_min": {"C2": 5_000, "C3": 5_000},
     "budget_max": {"C2": 500_000, "C3": 1_000_000},
@@ -252,6 +253,8 @@ class AgentCore:
         "store/frame": "C6",
         # bulk, best effort, below graph (C2) and pose (C1); latest frame only
         "lidar/points": "C3",
+        # live mission events (fleetlink.mission_events), lowest priority
+        "events": "C7",
     }
 
     def __init__(
@@ -407,6 +410,9 @@ class AgentCore:
         self.lidar_sent_bytes = 0  # size of the last frame put on the link
         # DsgUpdate decoding diagnostics (filled by AgentNode, reported in stats)
         self.dsg_diag: dict = {}
+        # mission event log + live C7 relay (fleetlink.mission_events.AgentEvents);
+        # None: no event log (no run dir), nothing changes on the wire
+        self.events = None
 
         self._sub = transport.subscribe(f"{self.prefix}/ctl/req", self._on_req)
         try:
@@ -1127,6 +1133,7 @@ class AgentCore:
                 **self._reloc_state(),
                 **self._phoenix_state(),
                 **({"lidar": self._lidar_state()} if self.lidar_topic else {}),
+                **(self.events.state() if self.events is not None else {}),
             }
 
     def _phoenix_state(self) -> dict:
@@ -1347,6 +1354,11 @@ class AgentCore:
                 self._t_paths = now
                 self._paths_tick()
             self._lidar_tick(now)
+            if self.events is not None:
+                try:
+                    self.events.tick(now)
+                except Exception:  # noqa: BLE001  (logging never stops the link)
+                    pass
             if (
                 self.store is not None
                 and now - self._t_store >= self.cfg["store_poll_s"]
@@ -1684,7 +1696,7 @@ def lookup_frame_align(tf_buffer, parent: str, child: str) -> dict:
 # subscriptions created late (ROMAN loop closures, health, guards, results) sat
 # behind the camera / grid / mesh callbacks that were always ready and were
 # never served.  The node is spun by a MultiThreadedExecutor (:func:`main`).
-AGENT_GROUPS = ("reloc", "health", "executor", "paths", "grid", "cameras")
+AGENT_GROUPS = ("reloc", "health", "executor", "paths", "grid", "cameras", "mission")
 
 
 def make_callback_groups(names=AGENT_GROUPS) -> dict:
@@ -1814,8 +1826,10 @@ class AgentNode:
         cfg["camera_idle_s"] = p("camera_idle_s", float(cfg["camera_idle_s"]))
         # C6 live image-store mirror: "" disables
         default_store = ""
-        if os.environ.get("ADT4_OUTPUT_DIR"):
-            default_store = os.path.join(os.environ["ADT4_OUTPUT_DIR"], "image_store")
+        # the run's store (run-adt4 per-run dirs), else the flat output dir
+        out_dir = os.environ.get("ADT4_RUN_DIR") or os.environ.get("ADT4_OUTPUT_DIR")
+        if out_dir:
+            default_store = os.path.join(out_dir, "image_store")
         cfg["store_path"] = p("store_path", default_store) or None
         cfg["store_send"] = p("store_send", bool(cfg["store_send"]))
         cfg["store_frames"] = p("store_frames", str(cfg["store_frames"]))
@@ -1829,6 +1843,13 @@ class AgentNode:
         cfg["lidar_bps"] = p("lidar_bps", int(cfg["lidar_bps"]))
         cfg["lidar_intensity"] = p("lidar_intensity", bool(cfg["lidar_intensity"]))
         cfg["lidar_ttl_s"] = p("lidar_ttl_s", float(cfg["lidar_ttl_s"]))
+        # mission event log (events/fleetlink_agent.jsonl in the run dir; "" = off)
+        # and its live C7 relay of selected events (fleetlink.mission_events)
+        run_dir = os.environ.get("ADT4_RUN_DIR", "").strip()
+        events_dir = p("events_dir", os.path.join(run_dir, "events") if run_dir else "")
+        events_live = p("events_live", True)
+        cfg["budgets"]["C7"] = p("budget_C7", int(cfg["budgets"]["C7"]))
+        mission_topic = p("mission_topic", "/global/mission/current")
         # phoenix platform topics (guards, plan progress, executor path)
         phx_topics = {
             "battery": p("battery_topic", "platform/bms/state"),
@@ -1871,6 +1892,8 @@ class AgentNode:
         self.graphs_processed = 0
 
         self._groups = make_callback_groups()
+        if events_dir:
+            self._start_events(robot, events_dir, bool(events_live), run_dir, mission_topic)
 
         from hydra_msgs.msg import DsgUpdate
 
@@ -2004,6 +2027,43 @@ class AgentNode:
             f"body={self.body_frame} epoch={self.core.epoch} dsg={dsg_topic} "
             f"budgets={cfg['budgets']}"
         )
+
+    def _start_events(self, robot, events_dir, live, run_dir, mission_topic) -> None:
+        """events/fleetlink_agent.jsonl + the live C7 relay; the mission id from
+        the latched ``mission_topic`` (the console's, relayed by fleetlink)."""
+        from fleetlink.eventlog import EventLog
+        from fleetlink.mission_events import SOURCE, AgentEvents, read_run_info
+
+        clock = self.node.get_clock()
+        info = read_run_info(run_dir)
+        log = EventLog(
+            os.path.join(events_dir, f"{SOURCE}.jsonl"), SOURCE, robot=robot,
+            run_id=info.get("run_id"), session_id=info.get("session_id"),
+            ros_time=lambda: clock.now().nanoseconds * 1e-9,
+            warn=lambda m: self.log.warn(m),
+        )  # fmt: skip
+        ev = AgentEvents(self.core, log, live=live, tail_dir=events_dir, run_info=info)
+        self.core.events = ev
+        ev.emit("run.agent", {"platform": self.platform, "live": live, "run": info,
+                              "budget_C7": self.core.sched.budget("C7")})  # fmt: skip
+        try:
+            from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+            from std_msgs.msg import String
+
+            qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                             durability=DurabilityPolicy.TRANSIENT_LOCAL)  # fmt: skip
+            self.node.create_subscription(
+                String, mission_topic, lambda m: self._on_mission(m.data), qos,
+                callback_group=self._group("mission"),
+            )  # fmt: skip
+        except ImportError:
+            self.log.warn("std_msgs unavailable: events carry no mission id")
+        self.log.info(f"mission events: {log.path} (live C7 relay {'on' if live else 'off'})")
+
+    def _on_mission(self, data: str) -> None:
+        with self.core._lock:  # noqa: SLF001
+            if self.core.events is not None and self.core.events.on_mission(data):
+                self.log.info(f"mission: {data}")
 
     def _group(self, name: str):
         """The callback group of one kind of subscription (None: the default

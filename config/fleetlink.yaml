@@ -6,7 +6,8 @@ budgets:
   C3: 100000  # mesh tiles + occupancy grid
   C4: 200000  # on-demand camera frames (request/reply)
   C5: 400000  # live camera video, all streams together (ADT4 console API.md §12)
-  C6: 150000  # live image-store mirror, lowest priority (ADT4 console API.md §13)
+  C6: 150000  # live image-store mirror (ADT4 console API.md §13)
+  C7: 2000  # live mission events, lowest priority (fleetlink.mission_events)
 budget_min:  # auto (AIMD) mode never goes below / above these
   C2: 5000
   C3: 5000

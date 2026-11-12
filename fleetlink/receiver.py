@@ -69,10 +69,11 @@ STREAM_CLASS = {
     "paths": "C1",
     "store/frame": "C6",
     "lidar/points": "C3",
+    "events": "C7",
 }
 RESEND_STREAMS = ("grid", "paths")
 # classes whose budget / rate the base reports and may set (C0 is unmetered)
-REPORTED_CLASSES = ("C1", "C2", "C3", "C4", "C5", "C6")
+REPORTED_CLASSES = ("C1", "C2", "C3", "C4", "C5", "C6", "C7")
 VIDEO_PREFIX = "video/"
 
 
@@ -850,6 +851,10 @@ class Receiver:
             events.extend(self._on_ack(r, p, now))
         elif stream == "store/frame" and self.store is not None:
             self._store_requests(self.store.on_frame(r.name, p, now))
+        elif stream == "events":
+            # live mission events (C7): JSONL lines of the robot's event logs
+            events.append(("events", {"lines": list(p.get("lines") or []), "dropped": p.get("dropped"),
+                                      "seq": seq, "lost": r.lost.get(cls, 0)}))  # fmt: skip
         return events
 
     @staticmethod
