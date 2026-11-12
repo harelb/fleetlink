@@ -24,7 +24,7 @@ from typing import Callable
 from fleetlink.transport import CLASSES, Transport
 
 AUTO_CLASSES = ("C2", "C3")
-HOLD_CLASSES = ("C2", "C3", "C4", "C5", "C6")
+HOLD_CLASSES = ("C2", "C3", "C4", "C5", "C6", "C7")
 
 
 @dataclass
