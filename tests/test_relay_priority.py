@@ -13,7 +13,14 @@ from fleetlink.scheduler import Item, Scheduler
 from fleetlink.transport import CLASSES, LinkEmulator, VirtualClock
 
 REQ = "/robot1/spot_executor_node/manipulation_request"
-BUDGETS = {"C1": 5000, "C2": 50000, "C3": 100000, "C4": 200000, "C5": 400000, "C6": 150000}
+BUDGETS = {
+    "C1": 5000,
+    "C2": 50000,
+    "C3": 100000,
+    "C4": 200000,
+    "C5": 400000,
+    "C6": 150000,
+}
 
 
 def cfg(priority=True):
