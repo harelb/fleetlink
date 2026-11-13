@@ -5,6 +5,13 @@ time, so sequence numbers and envelope timestamps are assigned when a message
 actually leaves (dropping or re-prioritising queued items never creates seq
 gaps).  Buckets allow a burst of ``burst_s`` seconds of budget and may go into
 debt by one message, so long-run throughput equals the budget.
+
+``hold`` (optional, ``hold(now) -> bool``): while it returns True the bulk
+classes (``HOLD_CLASSES``, C2-C6) are not drained (their tokens still refill up
+to the burst cap); C0 and C1 are never held.  The agent sets it to the ROS
+relay's :meth:`fleetlink.relay.RelayCore.urgent`, so a ``priority: high``
+relayed message (e.g. a manipulation approval request) is not slowed by the
+graph, mesh or image-store traffic queued here.
 """
 
 from __future__ import annotations
@@ -17,6 +24,7 @@ from typing import Callable
 from fleetlink.transport import CLASSES, Transport
 
 AUTO_CLASSES = ("C2", "C3")
+HOLD_CLASSES = ("C2", "C3", "C4", "C5", "C6")
 
 
 @dataclass
@@ -69,6 +77,8 @@ class Scheduler:
         self._last: float | None = None
         self._last_decrease = -1e9
         self._lock = threading.RLock()
+        self.hold: Callable[[float], bool] | None = None
+        self.held_drains = 0  # drains that held the bulk classes
 
     # -- budgets -------------------------------------------------------------
 
@@ -159,9 +169,19 @@ class Scheduler:
         """Send everything the buckets allow, strict priority. Returns bytes sent per class."""
         now = self.clock() if now is None else now
         sent = dict.fromkeys(CLASSES, 0)
+        held = False
+        if self.hold is not None:
+            try:
+                held = bool(self.hold(now))
+            except Exception:  # a broken hook must never stop the link
+                held = False
         with self._lock:
             self._refill(now)
+            if held:
+                self.held_drains += 1
             for c in CLASSES:
+                if held and c in HOLD_CLASSES:
+                    continue
                 q = self.queues[c]
                 while q and self.tokens[c] > 0 and self.total_tokens > 0:
                     if not self.transport.can_send(c):

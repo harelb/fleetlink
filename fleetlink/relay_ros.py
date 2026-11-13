@@ -244,12 +244,23 @@ class _RelayEnd:
     def __init__(
         self, node, tick_hz: float = 20.0, max_proxy_calls: int = MAX_PROXY_CALLS
     ):
-        from rclpy.callback_groups import ReentrantCallbackGroup
+        from rclpy.callback_groups import (
+            MutuallyExclusiveCallbackGroup,
+            ReentrantCallbackGroup,
+        )
 
         self.node = node
         self.log = node.get_logger()
         self._marshal = _Marshal(node)
         self._cbg = ReentrantCallbackGroup()
+        # Relayed topics get their own group.  In the node's default (mutually
+        # exclusive) group they queue behind every other callback of the host
+        # node, and rclpy offers ready subscriptions in creation order: on a busy
+        # agent (camera, lidar, mesh callbacks) the relay's, created last, were
+        # never served, so e.g. a manipulation approval request never left the
+        # robot while timer-driven TF kept flowing.  One group, mutually
+        # exclusive, keeps each topic's messages in order.
+        self._sub_group = MutuallyExclusiveCallbackGroup()
         self._clients: dict[str, object] = {}
         self._proxy_slots = threading.BoundedSemaphore(max(1, int(max_proxy_calls)))
         self.proxy_refused = 0  # relayed calls failed at once (link down / busy)
@@ -464,6 +475,7 @@ class RobotRelay(_RelayEnd):
                     lambda raw, n=e.name: self.core.publish(n, raw),
                     qos_profile(e.qos),
                     raw=True,
+                    callback_group=self._sub_group,
                 )
             elif e.kind == "tf":
                 self._ensure_tf_buffer()
@@ -628,10 +640,11 @@ class BaseBridge(_RelayEnd):
         nd = self.node
         # up: publish on the base graph (before the core subscribes)
         for e in self.config.resolve(robot, platform, self.base).in_topics("base"):
-            k = (e.topic, e.type)
+            topic = e.base_topic or e.topic
+            k = (topic, e.type)
             if k not in self._pubs:
                 self._pubs[k] = nd.create_publisher(
-                    import_type(e.type), e.topic, qos_profile(e.qos)
+                    import_type(e.type), topic, qos_profile(e.qos)
                 )
         core = RelayCore(
             robot,
@@ -654,6 +667,7 @@ class BaseBridge(_RelayEnd):
                 lambda raw, n=e.name, c=core: c.publish(n, raw),
                 qos_profile(e.qos),
                 raw=True,
+                callback_group=self._sub_group,
             )
         for s in core.srv_out.values():  # base calls robot: proxy server here
             self._proxy_server(core, s, s.base_name)
@@ -670,7 +684,7 @@ class BaseBridge(_RelayEnd):
     # -- inbound ----------------------------------------------------------------
 
     def _on_message(self, robot: str, e, data: bytes, meta: dict):
-        pub = self._pubs.get((e.topic, e.type))
+        pub = self._pubs.get((e.base_topic or e.topic, e.type))
         if pub is None:
             return None
         if e.kind != "tf_static":

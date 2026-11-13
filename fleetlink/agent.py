@@ -1677,6 +1677,24 @@ def lookup_frame_align(tf_buffer, parent: str, child: str) -> dict:
     return frame_align_ok(tf, parent, child)
 
 
+# The agent's own subscriptions, each kind in a MutuallyExclusiveCallbackGroup of
+# its own (DSG, mesh and the timers stay in the node's default group).  rclpy
+# offers ready timers first, then ready subscriptions in creation order, and a
+# group runs one callback at a time: in the single default group the
+# subscriptions created late (ROMAN loop closures, health, guards, results) sat
+# behind the camera / grid / mesh callbacks that were always ready and were
+# never served.  The node is spun by a MultiThreadedExecutor (:func:`main`).
+AGENT_GROUPS = ("reloc", "health", "executor", "paths", "grid", "cameras")
+
+
+def make_callback_groups(names=AGENT_GROUPS) -> dict:
+    """One MutuallyExclusiveCallbackGroup per name: each topic kind stays in
+    order, and no kind waits for another."""
+    from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+
+    return {name: MutuallyExclusiveCallbackGroup() for name in names}
+
+
 def lidar_qos():
     """The lidar subscription's QoS: depth 1 (only the newest cloud is wanted,
     none queue up behind a slow callback), best effort (matches a RELIABLE
@@ -1852,6 +1870,8 @@ class AgentNode:
         self.graphs_dropped = 0
         self.graphs_processed = 0
 
+        self._groups = make_callback_groups()
+
         from hydra_msgs.msg import DsgUpdate
 
         nd.create_subscription(DsgUpdate, dsg_topic, self._on_dsg, QoSProfile(depth=1))
@@ -1866,14 +1886,19 @@ class AgentNode:
         try:
             from nav_msgs.msg import OccupancyGrid, Path
 
-            nd.create_subscription(OccupancyGrid, grid_topic, self._on_grid, sensor_qos)
+            nd.create_subscription(
+                OccupancyGrid, grid_topic, self._on_grid, sensor_qos,
+                callback_group=self._group("grid"),
+            )  # fmt: skip
             if not phoenix:  # spot_executor_node paths
                 nd.create_subscription(
-                    Path, smooth_topic, lambda m: self._on_path("smooth", m), sensor_qos
-                )
+                    Path, smooth_topic, lambda m: self._on_path("smooth", m),
+                    sensor_qos, callback_group=self._group("paths"),
+                )  # fmt: skip
                 nd.create_subscription(
-                    Path, mlp_topic, lambda m: self._on_path("mlp", m), sensor_qos
-                )
+                    Path, mlp_topic, lambda m: self._on_path("mlp", m), sensor_qos,
+                    callback_group=self._group("paths"),
+                )  # fmt: skip
         except ImportError:
             self.log.warn("nav_msgs unavailable: no occupancy grid / paths")
         if not phoenix:
@@ -1881,8 +1906,9 @@ class AgentNode:
                 from visualization_msgs.msg import MarkerArray
 
                 nd.create_subscription(
-                    MarkerArray, target_topic, self._on_target, sensor_qos
-                )
+                    MarkerArray, target_topic, self._on_target, sensor_qos,
+                    callback_group=self._group("paths"),
+                )  # fmt: skip
             except ImportError:
                 self.log.warn("visualization_msgs unavailable: no MLP target")
         # cameras: subscribed lazily (eager_cameras always), see _update_cameras
@@ -1925,24 +1951,19 @@ class AgentNode:
         try:
             from ros_system_monitor_msgs.msg import StatusTable
 
-            nd.create_subscription(StatusTable, health_topic, self._on_health, 10)
+            nd.create_subscription(
+                StatusTable, health_topic, self._on_health, 10,
+                callback_group=self._group("health"),
+            )  # fmt: skip
         except ImportError:
             self.log.warn("ros_system_monitor_msgs unavailable: no health")
         if roman_lc_topic:
             try:
                 from roman_msgs.msg import LoopClosure
-
-                from .reloc import loop_closure_to_dict
-
-                self.core.enable_reloc(int(roman_live_id))
-                nd.create_subscription(
-                    LoopClosure,
-                    roman_lc_topic,
-                    lambda m: self.core.on_loop_closure(loop_closure_to_dict(m)),
-                    10,
-                )
             except ImportError:
                 self.log.warn("roman_msgs unavailable: no relocalization evidence")
+            else:
+                self._subscribe_reloc(LoopClosure, roman_lc_topic, int(roman_live_id))
 
         self._tf_buffer = None
         try:
@@ -1962,6 +1983,8 @@ class AgentNode:
         relay_config = p("relay_config", "")
         if relay_config:
             self.relay = self._start_relay(robot, relay_config, self.platform, topology)
+            # a pending ``priority: high`` relayed message holds the bulk classes
+            self.core.sched.hold = self.relay.core.urgent
 
         self.status = StatusReporter(
             nd, self._node_status, status_nickname, status_period_s
@@ -1982,6 +2005,24 @@ class AgentNode:
             f"budgets={cfg['budgets']}"
         )
 
+    def _group(self, name: str):
+        """The callback group of one kind of subscription (None: the default
+        group, for an AgentNode built without ``__init__`` in tests)."""
+        return getattr(self, "_groups", {}).get(name)
+
+    def _subscribe_reloc(self, msg_type, topic: str, live_id: int) -> None:
+        """ROMAN loop closures → the ``reloc`` state, in their own group."""
+        from .reloc import loop_closure_to_dict
+
+        self.core.enable_reloc(live_id)
+        self.node.create_subscription(
+            msg_type,
+            topic,
+            lambda m: self.core.on_loop_closure(loop_closure_to_dict(m)),
+            10,
+            callback_group=self._group("reloc"),
+        )
+
     def _subscribe_spot_executor(self, guards_topic: str, result_topic: str) -> None:
         """Spot: guards and action results from spot_executor_node."""
         try:
@@ -1992,12 +2033,14 @@ class AgentNode:
                 guards_topic,
                 lambda m: self.core.on_guards(guards_to_dict(m)),
                 10,
+                callback_group=self._group("executor"),
             )
             self.node.create_subscription(
                 ActionResultMsg,
                 result_topic,
                 lambda m: self.core.on_result(result_to_dict(m)),
                 10,
+                callback_group=self._group("executor"),
             )
         except ImportError:
             self.log.warn("robot_executor_msgs unavailable: no guards/results")
@@ -2007,6 +2050,7 @@ class AgentNode:
         omniplanner Path, and (if phx_nav_msgs imports) the MRP trajectory as the
         executor path overlay."""
         nd = self.node
+        group = self._group("executor")  # guards share PhoenixGuards: one group
         self._phx_guards = PhoenixGuards()
         g = self._phx_guards
         guards = self.core.on_guards
@@ -2020,12 +2064,14 @@ class AgentNode:
                 topics["battery"],
                 lambda m: guards(g.battery(m.percentage)),
                 qos,
+                callback_group=group,
             )
             for key, fn in (("estop", g.estop), ("safety_stop", g.safety_stop),
                             ("manual_mode", g.manual_mode)):  # fmt: skip
                 nd.create_subscription(
-                    Bool, topics[key], lambda m, fn=fn: guards(fn(m.data)), qos
-                )
+                    Bool, topics[key], lambda m, fn=fn: guards(fn(m.data)), qos,
+                    callback_group=group,
+                )  # fmt: skip
         except ImportError as exc:
             self.log.warn(f"phoenix guards unavailable: {exc}")
         try:  # optional: proves the MCU link is alive (its fields are not used)
@@ -2034,21 +2080,27 @@ class AgentNode:
             def on_mcu(_m):
                 g.values["mcu_t"] = time.time()
 
-            nd.create_subscription(Status, topics["mcu"], on_mcu, qos)
+            nd.create_subscription(
+                Status, topics["mcu"], on_mcu, qos, callback_group=group
+            )
         except ImportError:
             pass
         try:
             from nav_msgs.msg import Path
 
-            nd.create_subscription(Path, topics["plan"], self._on_plan, qos)
+            nd.create_subscription(
+                Path, topics["plan"], self._on_plan, qos,
+                callback_group=self._group("paths"),
+            )  # fmt: skip
         except ImportError:
             self.log.warn("nav_msgs unavailable: no phoenix plan progress")
         try:
             from phx_nav_msgs.msg import TrajectoryArray
 
             nd.create_subscription(
-                TrajectoryArray, topics["trajectories"], self._on_trajectories, qos
-            )
+                TrajectoryArray, topics["trajectories"], self._on_trajectories, qos,
+                callback_group=self._group("paths"),
+            )  # fmt: skip
         except ImportError:
             self.log.warn("phx_nav_msgs unavailable: no executor path overlay")
 
@@ -2174,6 +2226,7 @@ class AgentNode:
                     if compressed
                     else (lambda m, name=name: self._on_image(name, m)),
                     self._sensor_qos,
+                    callback_group=self._group("cameras"),
                 )
             elif name not in want and sub is not None:
                 self.node.destroy_subscription(sub)
@@ -2439,7 +2492,9 @@ def main(args=None) -> None:
     agent = AgentNode()
     # multi-threaded: the relay's proxy service servers block (reentrant group)
     # while the base answers, at most relay_ros.MAX_PROXY_CALLS of
-    # EXECUTOR_THREADS at once; the agent's own callbacks stay mutually exclusive
+    # EXECUTOR_THREADS at once; each kind of the agent's own callbacks is
+    # mutually exclusive within its group (AGENT_GROUPS), and the groups run
+    # side by side
     executor = make_executor()
     executor.add_node(agent.node)
     try:

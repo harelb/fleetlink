@@ -54,6 +54,16 @@ once when a part sent after it is acked first (fast retransmit).  The give-up
 budget (``max_tries``) counts timeouts without progress.  ``latest`` (fire and
 forget) is never split.
 
+**Priority.**  ``priority: high`` (topics only; default ``normal``) marks a message
+that someone is waiting on, e.g. a manipulation approval request with its images.
+Its class must be C0-C2 (default C2: zenoh DATA_HIGH, ahead of C4 queries, C3 mesh,
+C5 video and C6 store in zenoh's priority queues, behind C0 control and C1 state).
+While one is pending (not yet acked, and at most ``priority_hold_s`` since it was
+first sent), :meth:`RelayCore.urgent` is True; the robot agent then holds back its
+scheduler's bulk classes (C2-C6), so the message has the radio to itself apart
+from C0 / C1.  ``latest_reliable`` still applies: a newer message supersedes the
+pending one (its remaining parts are never sent).
+
 ``ttl_s`` is checked on both ends: the sender stops retrying, the receiver
 rejects (``ok: false, err: "expired"``) a message older than that, measured
 against its envelope ``t`` corrected by the heartbeat clock offset.
@@ -100,6 +110,7 @@ TF_PREFIX = "/_tf"  # wire names of composed transforms: /_tf/<parent>/<child>
 TF_STATIC = "/_tf_static"
 
 _TOPIC_KEYS = {
+    "base_topic",
     "topic",
     "type",
     "dir",
@@ -111,7 +122,11 @@ _TOPIC_KEYS = {
     "replay_on_resync",
     "qos",
     "platform",
+    "priority",
 }
+PRIORITIES = ("normal", "high")
+# a high-priority message must not sit behind bulk traffic in zenoh's queues
+HIGH_PRIORITY_CLASSES = ("C0", "C1", "C2")
 _TF_KEYS = {
     "parent",
     "child",
@@ -161,6 +176,8 @@ class Entry:
     parent: str = ""
     child: str = ""
     frames_prefix: str = ""
+    base_topic: str = ""  # optional base-side publication name for up topics
+    priority: str = "normal"  # normal | high (see the module docstring)
 
 
 @dataclass
@@ -296,6 +313,12 @@ class RelayConfig:
                 raise self._err(f"{what}: missing {k!r}")
         if not str(t["topic"]).startswith("/"):
             raise self._err(f"{what}: topic must be absolute: {t['topic']!r}")
+        base_topic = t.get("base_topic", "")
+        if base_topic:
+            if t["dir"] != "up":
+                raise self._err(f"{what}: base_topic is only supported for dir: up")
+            if not isinstance(base_topic, str) or not base_topic.startswith("/"):
+                raise self._err(f"{what}: base_topic must be an absolute topic name")
         qos = dict(DEFAULT_QOS, **(t.get("qos") or {}))
         if qos["reliability"] not in ("reliable", "best_effort"):
             raise self._err(f"{what}: qos.reliability {qos['reliability']!r}")
@@ -309,15 +332,30 @@ class RelayConfig:
             # a strict ttl drops until the clock offset is measured; only a
             # stream that is resent continuously may lose its first messages
             raise self._err(f"{what}: ttl_strict is only for mode latest")
+        priority = t.get("priority") or "normal"
+        if priority not in PRIORITIES:
+            raise self._err(f"{what}: priority must be normal|high, got {priority!r}")
+        cls = t.get("cls") or ("C1" if mode == "latest" else "C0")
+        if priority == "high":
+            if mode == "latest":
+                raise self._err(f"{what}: priority high needs an acked mode")
+            cls = t.get("cls") or "C2"
+            if cls not in HIGH_PRIORITY_CLASSES:
+                raise self._err(
+                    f"{what}: priority high needs cls C0, C1 or C2 (got {cls}: "
+                    "it would wait behind bulk traffic in zenoh's queues)"
+                )
         return {
             "topic": str(t["topic"]),
+            "base_topic": base_topic,
             "type": str(t["type"]),
             "dir": t["dir"],
             "mode": mode,
-            "cls": t.get("cls") or ("C1" if mode == "latest" else "C0"),
+            "cls": cls,
             "rate_hz": _num(t.get("rate_hz"), f"{what}.rate_hz"),
             "ttl_s": _num(t.get("ttl_s"), f"{what}.ttl_s"),
             "ttl_strict": ttl_strict,
+            "priority": priority,
             "replay_on_resync": bool(t.get("replay_on_resync", False)),
             "qos": {**qos, "depth": int(qos.get("depth") or 10)},
             "platform": _platforms(t.get("platform")),
@@ -403,6 +441,7 @@ class RelayConfig:
             topics[name] = Entry(
                 name=name,
                 topic=name,
+                base_topic=fmt(t["base_topic"]) if t["base_topic"] else "",
                 type=t["type"],
                 dir=t["dir"],
                 mode=t["mode"],
@@ -413,6 +452,7 @@ class RelayConfig:
                 replay_on_resync=t["replay_on_resync"],
                 qos=dict(t["qos"]),
                 platform=t["platform"],
+                priority=t["priority"],
             )
         for t in self.tf:
             if not _platform_ok(t["platform"], platform):
@@ -510,6 +550,7 @@ class _Pending:
     last_pack_t: float | None = None
     send_n: int = 0  # parts put on the wire so far
     part_order: dict = field(default_factory=dict)  # part -> send_n of its last send
+    t_new: float = 0.0  # first sent (my clock): bounds the priority hold
 
 
 class _Out:
@@ -603,6 +644,7 @@ class RelayCore:
         loss_window_s: float = 5.0,
         chunk_bytes: int = 16 * 1024,
         chunk_window: int = 6,
+        priority_hold_s: float = 10.0,
     ):
         if side not in SIDES:
             raise ValueError(f"side must be robot|base, got {side!r}")
@@ -630,6 +672,7 @@ class RelayCore:
         self.loss_window_s = loss_window_s
         self.chunk_bytes = max(1024, int(chunk_bytes))
         self.chunk_window = max(1, int(chunk_window))
+        self.priority_hold_s = float(priority_hold_s)
 
         self.epoch = secrets.token_hex(6)
         self.prefix = f"adt4/{robot}/ros"
@@ -869,7 +912,7 @@ class RelayCore:
             for old in o.pending:
                 self._id_owner.pop(old, None)
             o.pending.clear()
-        p = _Pending(pid, tseq, data, t, now, self.peer_epoch)
+        p = _Pending(pid, tseq, data, t, now, self.peer_epoch, t_new=now)
         p.parts = max(1, -(-len(data) // self.chunk_bytes))
         o.pending[pid] = p
         self._id_owner[pid] = e.name
@@ -1425,6 +1468,21 @@ class RelayCore:
         return (
             self.last_seen is not None and now - self.last_seen < self.connected_timeout
         )
+
+    def urgent(self, now: float | None = None) -> bool:
+        """True while a ``priority: high`` message is pending (not yet acked) and
+        was first sent less than ``priority_hold_s`` ago: the agent's scheduler
+        holds its bulk classes meanwhile.  The bound keeps an unreachable peer
+        from stalling the graph and mesh."""
+        now = self.clock() if now is None else now
+        with self._lock:
+            for o in self.out.values():
+                if o.entry.priority != "high":
+                    continue
+                for p in o.pending.values():
+                    if now - p.t_new < self.priority_hold_s:
+                        return True
+        return False
 
     def acked(self, name: str) -> int:
         o = self.out.get(name)

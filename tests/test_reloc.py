@@ -114,3 +114,60 @@ def test_state_carries_reloc_from_closures_and_alignment():
     assert rl["last_lc_age_s"] == 1.5
     assert rl["jumps"] == 1 and rl["last_jump"]["dyaw"] == 178.0
     assert rl["total"]["dxy"] == round(math.hypot(18.0, 35.0), 3)
+
+
+def test_roman_subscription_has_its_own_group_and_counts_prior_closures():
+    """The ROMAN loop-closure subscription is not in the node's default group
+    (where busy camera / mesh callbacks starved it on the robots: prior_lcs
+    stayed 0 while hydra_multi accepted the closures), and a (0, 1) closure
+    reaches ``reloc.prior_lcs``."""
+    import pytest
+
+    pytest.importorskip("rclpy")
+    from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+
+    from fleetlink.agent import AGENT_GROUPS, AgentNode, make_callback_groups
+
+    calls = []
+
+    class Node:
+        def create_subscription(self, *a, **k):
+            calls.append((a, k))
+            return object()
+
+    tr, clock, core = _core()
+    an = AgentNode.__new__(AgentNode)
+    an.node, an.core, an._groups = Node(), core, make_callback_groups()
+    an._subscribe_reloc("LoopClosure", "roman/roman_lc/loop_closure", 0)
+    ((args, kw),) = calls
+    assert args[:2] == ("LoopClosure", "roman/roman_lc/loop_closure")
+    group = kw["callback_group"]
+    assert isinstance(group, MutuallyExclusiveCallbackGroup)
+    assert group is an._groups["reloc"]
+    others = [an._groups[n] for n in AGENT_GROUPS if n != "reloc"]
+    assert all(group is not g for g in others)
+    callback = args[2]
+    msg = NS(robot1_id=0, robot2_id=1, submap1_id=12, submap2_id=4, num_associations=9)
+    callback(msg)
+    callback(NS(robot1_id=0, robot2_id=0, submap1_id=1, submap2_id=2,
+                num_associations=3))  # fmt: skip
+    core.tick(clock.advance(0.5))
+    rl = _states(tr)[-1]["reloc"]
+    assert (rl["prior_lcs"], rl["self_lcs"], rl["best_assoc"]) == (1, 1, 9)
+
+
+def test_agent_subscriptions_are_in_their_own_groups():
+    """Guards, results, health and paths each get a group; without
+    ``__init__`` (older tests) the default group is used."""
+    import pytest
+
+    pytest.importorskip("rclpy")
+    from fleetlink.agent import AGENT_GROUPS, AgentNode, make_callback_groups
+
+    groups = make_callback_groups()
+    assert set(groups) == set(AGENT_GROUPS)
+    assert len({id(g) for g in groups.values()}) == len(AGENT_GROUPS)
+    an = AgentNode.__new__(AgentNode)
+    assert an._group("reloc") is None
+    an._groups = groups
+    assert an._group("health") is groups["health"]
