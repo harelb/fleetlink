@@ -10,7 +10,6 @@
 #
 # topics:  one entry per ROS topic that crosses the radio.
 #   topic          name pattern, usually "/{robot}/..."
-#   base_topic     optional base-side publication name (up only); topic stays the wire/robot name
 #   type           ROS message type (pkg/msg/Name). Type-hash mismatch => message rejected.
 #   dir            down = base -> robot, up = robot -> base. A topic must appear in ONE
 #                  direction only (validation rejects both; this is the loop prevention).

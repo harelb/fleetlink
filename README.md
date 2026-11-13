@@ -408,16 +408,6 @@ when non-zero, and the reason when the image-store mirror is disabled (a note, n
 
 ## Generic ROS relay (fleetlink mode)
 
-For an `up` topic, optional `base_topic` changes only where the base publishes
-it; the wire name and robot-side subscription remain `topic`. For example,
-`topic: /{robot}/spot_executor_node/plan_progress` with
-`base_topic: /plan_progress` collects each robot's private reports on one base
-topic. A separate `down` entry for `/plan_progress` fans those reports out to
-all robots. Received global reports never feed the private uplinks, avoiding
-echo loops. Aliases support `{robot}` / `{base}` and must be absolute names;
-`base_topic` is rejected on `down` entries.
-
-
 In fleetlink mode each robot's ROS graph stays on the robot, and the ROS topics, services and
 transforms that must cross the radio are relayed by fleetlink. They are listed in a relay
 table that the deployment provides (`relay_config`); [`config/relay.example.yaml`](config/relay.example.yaml)
