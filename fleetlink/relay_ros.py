@@ -640,11 +640,10 @@ class BaseBridge(_RelayEnd):
         nd = self.node
         # up: publish on the base graph (before the core subscribes)
         for e in self.config.resolve(robot, platform, self.base).in_topics("base"):
-            topic = e.base_topic or e.topic
-            k = (topic, e.type)
+            k = (e.topic, e.type)
             if k not in self._pubs:
                 self._pubs[k] = nd.create_publisher(
-                    import_type(e.type), topic, qos_profile(e.qos)
+                    import_type(e.type), e.topic, qos_profile(e.qos)
                 )
         core = RelayCore(
             robot,
@@ -684,7 +683,7 @@ class BaseBridge(_RelayEnd):
     # -- inbound ----------------------------------------------------------------
 
     def _on_message(self, robot: str, e, data: bytes, meta: dict):
-        pub = self._pubs.get((e.base_topic or e.topic, e.type))
+        pub = self._pubs.get((e.topic, e.type))
         if pub is None:
             return None
         if e.kind != "tf_static":
