@@ -86,7 +86,11 @@ DEFAULT_CONFIG = {
     "ack_cache": 256,
     "grid_period_s": 5.0,
     "paths_hz": 2.0,  # how often paths are checked for a change
-    "cameras": ["rgb", "overlay"],
+    "cameras": ["rgb", "depth", "overlay"],
+    # depth cameras drawn with a fixed colormap over this range (metres; near red,
+    # far blue): a colour always means the same distance. [] = grey, stretched per
+    # frame (media.DEPTH_RANGE_M)
+    "depth_range_m": [0.3, 10.0],
     # cameras subscribed all the time; the others only while wanted (a C4 query
     # or a C5 video request within ``camera_idle_s``), so e.g. six Spot cameras
     # behind lazy image_transport republishers cost nothing until viewed
@@ -264,6 +268,8 @@ class AgentCore:
         self.robot = robot
         self.transport = transport
         self.cfg = _merge(config)
+        rng = [float(x) for x in self.cfg.get("depth_range_m") or []]
+        media.DEPTH_RANGE_M = (rng[0], rng[1]) if len(rng) == 2 else None
         self.clock = clock
         self.epoch = secrets.token_hex(6)
         self.prefix = f"adt4/{robot}"
@@ -1803,6 +1809,8 @@ class AgentNode:
                 [
                     # robot1: euclid_zed/rgb/image_rect_color
                     f"rgb={robot}_zed/rgb/image_rect_color",
+                    # 32FC1 m; streamed only while a viewer asks (not eager)
+                    f"depth={robot}_zed/depth/depth_registered",
                     "overlay=semantic_overlay/image_raw",
                 ],
             )
@@ -1812,6 +1820,10 @@ class AgentNode:
             p("eager_cameras", list(cfg["eager_cameras"])) or []
         )
         cfg["camera_idle_s"] = p("camera_idle_s", float(cfg["camera_idle_s"]))
+        cfg["depth_range_m"] = [
+            float(x)
+            for x in p("depth_range_m", [float(x) for x in cfg["depth_range_m"]]) or []
+        ]
         # C6 live image-store mirror: "" disables
         default_store = ""
         if os.environ.get("ADT4_OUTPUT_DIR"):
