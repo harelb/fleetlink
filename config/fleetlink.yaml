@@ -31,6 +31,10 @@ c2_ring: 256  # last C2 messages kept for `resend` gap repair (0 = always resync
 # C5 video request wanted them within camera_idle_s
 eager_cameras: [rgb, overlay]
 camera_idle_s: 15.0
+# depth cameras (the ZED's `depth`) drawn with a fixed colormap over this range in
+# metres (near red, far blue), so a colour always means the same distance;
+# [] = grey, stretched per frame
+depth_range_m: [0.3, 10.0]
 # C6 live image-store mirror (the ROS param store_path defaults to
 # $ADT4_OUTPUT_DIR/image_store; "" disables)
 store_send: false  # off by default; the console's Live panel turns it on per robot

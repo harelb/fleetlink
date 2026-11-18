@@ -6,6 +6,8 @@ import time
 
 import pytest
 
+from fleetlink import media
+
 # throwaway router; NEVER 7447 (the live system's router). FLEETLINK_TEST_PORT moves
 # it (and the late router on the next port) when another run uses these ports.
 ROUTER_PORT = int(os.environ.get("FLEETLINK_TEST_PORT", 17448))
@@ -90,3 +92,12 @@ def late_router():
         pytest.skip(f"port {LATE_ROUTER_PORT} already in use")
     yield router
     router.stop(kill=True)
+
+
+@pytest.fixture(autouse=True)
+def _depth_range_default():
+    """An AgentCore sets the module-wide depth range (media.DEPTH_RANGE_M) from its
+    config; start every test from the grey default."""
+    media.DEPTH_RANGE_M = None
+    yield
+    media.DEPTH_RANGE_M = None

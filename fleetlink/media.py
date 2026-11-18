@@ -118,14 +118,64 @@ except Exception:  # noqa: BLE001
     _cv2 = None
 
 
+# Depth images (16UC1 / mono16 in mm, 32FC1 in m) as pictures: None = grey,
+# stretched per frame between the 2nd and 98th percentile (flickers, no fixed
+# meaning); (near_m, far_m) = a fixed metric colormap (``depth_to_rgb``). The
+# agent sets it from its ``depth_range_m`` parameter.
+DEPTH_RANGE_M: tuple[float, float] | None = None
+
+
+def _turbo_lut() -> np.ndarray:
+    """256 x 3 uint8 Turbo colormap (blue -> red), from Google's polynomial fit,
+    so robots without OpenCV draw the same colours."""
+    x = np.linspace(0.0, 1.0, 256)
+    r = 0.13572138 + x * (
+        4.61539260
+        + x
+        * (-42.66032258 + x * (132.13108234 + x * (-152.94239396 + x * 59.28637943)))
+    )
+    g = 0.09140261 + x * (
+        2.19418839
+        + x * (4.84296658 + x * (-14.18503333 + x * (4.27729857 + x * 2.82956604)))
+    )
+    b = 0.10667330 + x * (
+        12.64194608
+        + x * (-60.58204836 + x * (110.36276771 + x * (-89.90310912 + x * 27.34824973)))
+    )
+    return (np.clip(np.stack([r, g, b], 1), 0, 1) * 255).round().astype(np.uint8)  # fmt: skip
+
+
+_TURBO = _turbo_lut()
+
+
+def depth_to_rgb(depth_m: np.ndarray, near_m: float, far_m: float) -> np.ndarray:
+    """Depth in metres (H, W) -> uint8 RGB with a fixed scale: near red, far blue,
+    spaced in inverse depth (more colours close by, where the detail is). Invalid
+    (0, NaN, inf) pixels are black; beyond the range clamps to the end colours."""
+    near_m = max(float(near_m), 1e-3)
+    far_m = max(float(far_m), near_m * 1.001)
+    valid = np.isfinite(depth_m) & (depth_m > 0)
+    d = np.clip(np.where(valid, depth_m, far_m), near_m, far_m)
+    t = (1.0 / d - 1.0 / far_m) / (1.0 / near_m - 1.0 / far_m)  # near 1, far 0
+    # Turbo's ends are near-black: far = 0.10 (blue), near = 0.95 (red)
+    x = 0.10 + 0.85 * t
+    out = _TURBO[np.clip((x * 255).round(), 0, 255).astype(np.uint8)]
+    out[~valid] = 0
+    return out
+
+
 def image_to_array(
-    encoding: str, width: int, height: int, step: int, data
+    encoding: str, width: int, height: int, step: int, data, depth_range=...
 ) -> np.ndarray:
     """sensor_msgs/Image fields → uint8 RGB (H, W, 3) or grey (H, W).
 
     rgb8 / bgr8 / rgba8 / bgra8 / mono8 pass through (channel-swapped to RGB);
-    16UC1 / mono16 / 32FC1 (depth) are normalised to 0..255 between the 2nd and
-    98th percentile of the valid (nonzero, finite) pixels."""
+    16UC1 / mono16 (mm) / 32FC1 (m) depth: with ``depth_range`` (near_m, far_m;
+    default ``DEPTH_RANGE_M``) a fixed metric colormap (RGB), else grey
+    normalised to 0..255 between the 2nd and 98th percentile of the valid
+    (nonzero, finite) pixels."""
+    if depth_range is ...:
+        depth_range = DEPTH_RANGE_M
     enc = (encoding or "").lower()
     buf = np.frombuffer(bytes(data), np.uint8)
     if enc in ("jpeg", "png"):  # sensor_msgs/CompressedImage payload
@@ -151,6 +201,9 @@ def image_to_array(
         step = step or w * size
         rows = buf[: h * step].reshape(h, step)[:, : w * size]
         img = np.ascontiguousarray(rows).view(dt).reshape(h, w).astype(np.float32)
+        if depth_range:
+            metres = img if enc == "32fc1" else img / 1000.0
+            return depth_to_rgb(metres, *depth_range)
         valid = np.isfinite(img) & (img > 0)
         out = np.zeros((h, w), np.uint8)
         if valid.any():

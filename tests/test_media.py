@@ -294,3 +294,50 @@ def test_camera_query_times_out_cleanly():
     # nobody answers for an unknown robot either
     got = _ask(link, rx, "rgb", until=22.0, robot="ghost", timeout=1.0)
     assert len(got) == 1 and got[0][1] is None
+
+
+def test_depth_fixed_colormap_is_metric_and_stable(monkeypatch):
+    # 32FC1 metres: near red, far blue, invalid black; the same depth gives the same
+    # colour whatever else is in the frame (no per-frame stretch)
+    d = np.array([[0.3, 1.0, 10.0, 0.0], [np.nan, np.inf, 20.0, 0.1]], np.float32)
+    rgb = media.image_to_array("32FC1", 4, 2, 16, d.tobytes(), depth_range=(0.3, 10.0))
+    assert rgb.shape == (2, 4, 3) and rgb.dtype == np.uint8
+    near, far = rgb[0, 0], rgb[0, 2]
+    assert near[0] > near[2] and far[2] > far[0]  # red near, blue far
+    assert rgb[0, 3].tolist() == [0, 0, 0] and rgb[1, 0].tolist() == [0, 0, 0]
+    assert rgb[1, 1].tolist() == [0, 0, 0]  # inf is invalid too
+    assert (
+        rgb[1, 2].tolist() == far.tolist() and rgb[1, 3].tolist() == near.tolist()
+    )  # clamped
+    other = np.full((2, 4), 1.0, np.float32)
+    other[0, 0] = 9.0
+    same = media.image_to_array(
+        "32FC1", 4, 2, 16, other.tobytes(), depth_range=(0.3, 10.0)
+    )
+    assert same[0, 1].tolist() == rgb[0, 1].tolist()  # 1 m stays the same colour
+    # 16UC1 is millimetres
+    mm = (d[:1] * 1000).astype(np.uint16)
+    rgb16 = media.image_to_array(
+        "16UC1", 4, 1, 8, mm.tobytes(), depth_range=(0.3, 10.0)
+    )
+    assert rgb16[0, :3].tolist() == rgb[0, :3].tolist()
+    # the module default applies when no range is passed; None keeps the grey stretch
+    monkeypatch.setattr(media, "DEPTH_RANGE_M", (0.3, 10.0))
+    assert media.image_to_array("32FC1", 4, 2, 16, d.tobytes()).shape == (2, 4, 3)
+    monkeypatch.setattr(media, "DEPTH_RANGE_M", None)
+    assert media.image_to_array("32FC1", 4, 2, 16, d.tobytes()).shape == (2, 4)
+
+
+def test_agent_sets_the_depth_range_from_its_config():
+    from fleetlink.agent import AgentCore
+
+    class T:  # a transport that is never used
+        def __getattr__(self, name):
+            return lambda *a, **k: None
+
+    AgentCore("r1", T(), {"depth_range_m": [0.5, 8.0]})
+    assert media.DEPTH_RANGE_M == (0.5, 8.0)
+    AgentCore("r1", T(), {"depth_range_m": []})
+    assert media.DEPTH_RANGE_M is None
+    AgentCore("r1", T(), {})
+    assert media.DEPTH_RANGE_M == (0.3, 10.0)  # the default
